@@ -263,7 +263,13 @@ def test_scan_yields_between_batches_and_visits_every_advertised_player(monkeypa
             update(item["name"], {"audio": [], "subtitles": []}, None)
 
     monkeypatch.setattr(discovery, "_scan", scan)
-    entry = {"pending": True, "streams": {}, "errors": {}, "checked": 0}
+    entry = {
+        "pending": True,
+        "streams": {},
+        "errors": {},
+        "checked": 0,
+        "full_scan": True,
+    }
     key = (discovery.base_url(), path, 1, 1)
     discovery._run(key, entry)
     assert visited == ["vidnest", "vidrock"]
@@ -287,3 +293,31 @@ def test_new_title_jobs_precede_continuations():
     fresh = workers.submit(lambda: None)
     assert workers.queue.get()[2] is fresh
     assert workers.queue.get()[2] is background
+
+
+def test_default_scan_uses_only_advertised_preset_players():
+    sources = [
+        {"name": name, "url": "https://example.com/" + name}
+        for name in ("slow-a", "VidRock", "vidnest", "moviesapi", "vidrift", "slow-b")
+    ]
+    assert [item["name"] for item in discovery.ordered_players(sources)] == [
+        "vidnest",
+        "VidRock",
+        "moviesapi",
+        "vidrift",
+    ]
+    assert len(discovery.ordered_players(sources, full_scan=True)) == 6
+
+
+def test_full_and_preset_discovery_have_separate_caches(monkeypatch):
+    queued = []
+    monkeypatch.setattr(discovery, "_jobs", {})
+    monkeypatch.setattr(
+        discovery, "_workers", SimpleNamespace(submit=lambda *args: queued.append(args))
+    )
+    path = "/watch/tv-example-abcd1234"
+    assert discovery.discover(path)["scan_mode"] == "preset"
+    assert discovery.discover(path, full_scan=True)["scan_mode"] == "all"
+    assert len(queued) == 2
+    discovery.discover(path)
+    assert len(queued) == 2

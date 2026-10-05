@@ -28,6 +28,7 @@ from .english_source import (
 from .models.common.hls import _parse_attributes
 
 _CACHE_TTL = 300
+PRESET_PLAYERS = ("vidnest", "vidrock", "moviesapi", "vidrift")
 _jobs = {}
 _lock = threading.Lock()
 
@@ -64,11 +65,13 @@ class DiscoveryWorkers:
 _workers = DiscoveryWorkers()
 
 
-def ordered_players(sources):
-    """Probe recently verified integrations first, then all advertised players."""
-    first = ("vidnest", "vidrock", "moviesapi", "vidrift")
+def ordered_players(sources, full_scan=False):
+    """Default to verified integrations; include all others only on request."""
+    first = PRESET_PLAYERS
     return sorted(
-        sources,
+        sources
+        if full_scan
+        else [item for item in sources if item["name"].casefold() in first],
         key=lambda item: (
             first.index(item["name"].casefold())
             if item["name"].casefold() in first
@@ -509,9 +512,11 @@ async def _scan(document, update):
             await browser.close()
 
 
-def discover(path, season=1, episode=1):
+def discover(path, season=1, episode=1, full_scan=False):
     """Start a bounded background scan and return its available choices so far."""
     key = (base_url(), path, season, episode)
+    if full_scan:
+        key += ("all",)
     now = time.monotonic()
     with _lock:
         entry = _jobs.get(key)
@@ -533,6 +538,7 @@ def discover(path, season=1, episode=1):
                 "streams": {},
                 "errors": {},
                 "queued": True,
+                "full_scan": full_scan,
             }
             _jobs[key] = entry
             _workers.submit(_run, key, entry)
@@ -554,18 +560,24 @@ def discover(path, season=1, episode=1):
             "checked": entry["checked"],
             "total": entry["total"],
             "error": entry.get("error", ""),
+            "scan_mode": "all" if entry.get("full_scan") else "preset",
         }
 
 
 def _run(key, entry, document=None):
     continued = False
     try:
-        origin, path, season, episode = key
+        origin, path, season, episode = key[:4]
         with _lock:
             entry["queued"] = False
         if document is None:
             document = details(path, season, episode)
-            document = {**document, "sources": ordered_players(document["sources"])}
+            document = {
+                **document,
+                "sources": ordered_players(
+                    document["sources"], entry.get("full_scan", False)
+                ),
+            }
             with _lock:
                 entry["total"] = len(document["sources"])
                 entry["original_language"] = document.get("original_language", "")

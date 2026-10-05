@@ -91,10 +91,10 @@ def episodes(url):
     ]
 
 
-def providers(url):
+def providers(url, full_scan=False):
     from ..english_discovery import discover
 
-    return discover(*selection(url))
+    return discover(*selection(url), full_scan)
 
 
 def queue_entries(

@@ -55,6 +55,36 @@ def test_shared_title_modal_contracts(client, watch):
     ).get_json()["providers"] == {"Source Audio": ["Vidrock"]}
 
 
+def test_full_scan_is_explicit_and_invalid_modes_are_rejected(
+    client, watch, monkeypatch
+):
+    from aniworld import english_discovery
+
+    calls = []
+    monkeypatch.setattr(
+        english_discovery,
+        "discover",
+        lambda *args: calls.append(args) or {"providers": {}, "discovering": False},
+    )
+    url = source.base_url() + PATH
+    assert client.get("/api/providers", query_string={"url": url}).status_code == 200
+    assert calls[-1][-1] is False
+    assert (
+        client.get(
+            "/api/providers", query_string={"url": url, "scan": "all"}
+        ).status_code
+        == 200
+    )
+    assert calls[-1][-1] is True
+    assert (
+        client.get(
+            "/api/providers", query_string={"url": url, "scan": "invalid"}
+        ).status_code
+        == 400
+    )
+    assert len(calls) == 2
+
+
 def test_shared_download_queues_multiple_seasons(client, watch):
     url = source.base_url() + PATH
     response = client.post(

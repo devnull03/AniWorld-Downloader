@@ -33,15 +33,23 @@ require unsupported layouts, iframe chains, verification or other stream
 formats may be unavailable. Discovery is bounded to two pages per scan and
 cached briefly. It does not bypass DRM or ignore TLS errors.
 
-Scans check previously verified integrations first and yield after batches of
-two advertised players. New title scans take priority over continuations, so
-an older 50-player scan cannot monopolize the workers. Concurrency stays at
+Default scans check four preset integrations: Vidnest, Vidrock (including its
+internal servers), MoviesAPI and Vidrift, when advertised for the title. The
+dialog's “Scan all advertised players” button explicitly enables the larger
+scan, with a separate cache. Scans yield after batches of two players. New
+title scans take priority over continuations. Concurrency stays at
 two workers with at most two pages each. The initial dialog stays on its
 loading skeleton until the complete provider scan finishes, with checked-player
 progress displayed there. Subsequent episode probes use a checking placeholder;
 transient API errors preserve known choices and retry. A failed default player still permits probing its advertised
 internal alternatives. Selected internal-provider names are accepted by the
 queue validator.
+
+A live Tokyo Revengers preset check completed in 30 seconds with five player
+checks including an internal server, and exposed English, French and Japanese
+audio choices with English subtitle combinations. This is one measured run;
+provider response times vary. Browser fixtures also verified that only an
+explicit full-scan click requests `scan=all`.
 
 Seasons load episode names and counts on expansion, immediately showing a
 loading message and reusing the results when reopened. Empty source responses

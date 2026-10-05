@@ -39,6 +39,16 @@
   }
   const qualitySelect = el("qualitySelect");
   const sourceDiscoveryStatus = el("sourceDiscoveryStatus");
+  if (!el("sourceFullScanBtn")) {
+    const button = document.createElement("button");
+    button.id = "sourceFullScanBtn";
+    button.type = "button";
+    button.className = "btn";
+    button.hidden = true;
+    button.textContent = "Scan all advertised players";
+    sourceDiscoveryStatus.after(button);
+  }
+  const sourceFullScanBtn = el("sourceFullScanBtn");
   const languageProviderRow = el("languageProviderRow");
   const mangaFireRow = el("mangaFireRow");
   const customPathRow = el("customPathRow");
@@ -104,6 +114,7 @@
   let languageChosenByUser = false;
   let providerChosenByUser = false;
   let providerProbeUrl = "";
+  let fullSourceScan = false;
 
   const isHanime = (url) => url.includes("hanime.tv/");
   const isMangaFire = (url) => url.includes("mangafire.to/");
@@ -497,6 +508,9 @@
     languageChosenByUser = false;
     providerChosenByUser = false;
     providerProbeUrl = "";
+    fullSourceScan = false;
+    sourceFullScanBtn.disabled = false;
+    sourceFullScanBtn.textContent = "Scan all advertised players";
     qualitySelect.innerHTML = '<option>Best available</option>';
     sourceDiscoveryStatus.textContent = "";
   }
@@ -575,7 +589,8 @@
       }
     }
     try {
-      const data = await apiFetch(`/api/providers?url=${encodeURIComponent(episodeUrl)}`, { timeoutMs: 30000 });
+      const scan = currentSite === "movies123" ? `&scan=${fullSourceScan ? "all" : "preset"}` : "";
+      const data = await apiFetch(`/api/providers?url=${encodeURIComponent(episodeUrl)}${scan}`, { timeoutMs: 30000 });
       if (token !== openToken || episodeUrl !== providerProbeUrl) return;
       availableProviders = data.providers || null;
       if (currentSite === "movies123") {
@@ -592,7 +607,7 @@
         availableQualities = data.qualities || {};
         sourceDiscoveryStatus.textContent = data.error || (data.discovering
           ? `Finding available players, audio and quality… ${data.checked || 0}/${data.total || "?"} checked`
-          : languages.length ? `Discovery complete: ${data.checked || 0} players checked.` : "No supported players answered. Reopen the title to try again.");
+          : languages.length ? `Discovery complete: ${data.checked || 0} players checked.` : fullSourceScan ? "No supported players answered. Reopen the title to try again." : "No preset players answered. Try scanning all advertised players.");
         if (waitUntilComplete) seriesLoading.querySelector(".skeleton-status").textContent = sourceDiscoveryStatus.textContent;
         updateProviderSelect();
         if (!languages.length) {
@@ -645,6 +660,26 @@
 
   languageSelect.addEventListener("change", () => { languageChosenByUser = true; updateProviderSelect(); });
 
+  sourceFullScanBtn.addEventListener("click", async () => {
+    if (!providerProbeUrl) return;
+    const token = openToken;
+    const url = providerProbeUrl;
+    fullSourceScan = true;
+    sourceFullScanBtn.disabled = true;
+    showSkeleton(true);
+    try {
+      await fetchProviders(url, token, true, true);
+      if (token === openToken) sourceFullScanBtn.textContent = "Full scan complete";
+    } catch (error) {
+      if (token === openToken) {
+        sourceDiscoveryStatus.textContent = error.message;
+        sourceFullScanBtn.disabled = false;
+      }
+    } finally {
+      if (token === openToken) showSkeleton(false);
+    }
+  });
+
   async function openSeries(url) {
     const token = ++openToken;
     seriesUrl = url;
@@ -659,6 +694,7 @@
     mangaFireRow.hidden = !manga;
     el("sourceQualityRow").hidden = currentSite !== "movies123";
     sourceDiscoveryStatus.hidden = currentSite !== "movies123";
+    sourceFullScanBtn.hidden = currentSite !== "movies123";
     if (!hanime && !manga) {
       languageSelect.disabled = false;
       providerSelect.disabled = false;

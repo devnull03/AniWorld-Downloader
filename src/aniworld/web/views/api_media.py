@@ -449,7 +449,10 @@ def providers():
 
     try:
         if english_adapter.is_source_url(url):
-            return jsonify(english_adapter.providers(url))
+            mode = request.args.get("scan", "preset")
+            if mode not in ("preset", "all"):
+                return jsonify({"error": "Select preset or all for discovery."}), 400
+            return jsonify(english_adapter.providers(url, full_scan=mode == "all"))
         provider = resolve_provider(url)
         if provider.name == "MangaFire":
             return jsonify({"providers": {}})
