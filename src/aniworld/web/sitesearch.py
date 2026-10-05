@@ -7,8 +7,8 @@ come back.
 
 import re
 
-from ..english_source import catalog as query_movies123
 from ..logger import get_logger
+from ..models.movies123.source import catalog as query_movies123
 from ..search import (
     fetch_aniworld_genres,
     fetch_burningseries_genres,

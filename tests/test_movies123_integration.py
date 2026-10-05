@@ -5,8 +5,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from aniworld import english_source as source
-from aniworld.web import db, english_adapter, sitesearch
+from aniworld.models.movies123 import source, urls
+from aniworld.web import db, sitesearch
 
 PATH = "/watch/tv-example-abcd1234"
 WATCH = """<script type="application/ld+json">{"@type":"TVSeries","name":"Example","description":"A show."}</script>
@@ -21,7 +21,7 @@ WATCH = """<script type="application/ld+json">{"@type":"TVSeries","name":"Exampl
 @pytest.fixture
 def watch(monkeypatch):
     monkeypatch.setattr(source, "fetch", lambda *args: SimpleNamespace(text=WATCH))
-    from aniworld import english_discovery
+    from aniworld.models.movies123 import discovery as english_discovery
 
     monkeypatch.setattr(
         english_discovery,
@@ -58,7 +58,7 @@ def test_shared_title_modal_contracts(client, watch):
 def test_full_scan_is_explicit_and_invalid_modes_are_rejected(
     client, watch, monkeypatch
 ):
-    from aniworld import english_discovery
+    from aniworld.models.movies123 import discovery as english_discovery
 
     calls = []
     monkeypatch.setattr(
@@ -102,7 +102,7 @@ def test_shared_download_queues_multiple_seasons(client, watch):
         (1, 2),
         (2, 1),
     ]
-    assert item["series_url"] == PATH
+    assert item["series_url"] == url
     assert item["language"] == "Source Audio"
 
 
@@ -161,6 +161,6 @@ def test_shared_search_and_source_switch(client, monkeypatch):
 
 
 def test_source_adapter_rejects_other_origins():
-    assert not english_adapter.is_source_url("https://example.com" + PATH)
+    assert not urls.is_source_url("https://example.com" + PATH)
     with pytest.raises(source.SourceError):
-        english_adapter.selection("https://example.com" + PATH)
+        urls.selection("https://example.com" + PATH)

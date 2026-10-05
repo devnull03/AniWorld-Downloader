@@ -90,6 +90,22 @@ def test_page_zero_is_still_passed_along():
 # ---------------------------------------------------------------------------
 # A download that works
 # ---------------------------------------------------------------------------
+def test_invalid_source_record_does_not_skip_remaining_episodes(queue_item, run_worker):
+    queue_id = queue_item(
+        episodes=[
+            {"url": "bad", "english_path": "../invalid", "season": 1, "episode": 1},
+            "https://x/ep2",
+        ]
+    )
+    calls = run_worker(queue_id)
+    assert [c["url"] for c in calls] == ["https://x/ep2"]
+    item = db.get_queue_item(queue_id)
+    assert item["status"] == "completed"
+    errors = json.loads(item["errors"])
+    assert len(errors) == 1
+    assert "Invalid queued title" in errors[0]["error"]
+
+
 def test_one_episode_completes(queue_item, run_worker):
     queue_id = queue_item(episodes=["https://x/ep1"])
     db.set_queue_status(queue_id, "running")

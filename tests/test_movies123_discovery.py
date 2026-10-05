@@ -4,10 +4,10 @@ from types import SimpleNamespace
 
 import pytest
 
-from aniworld import english_discovery as discovery
-from aniworld.english_download import EnglishEpisode, queued_episode
-from aniworld.english_source import SourceError
 from aniworld.models.common import hls
+from aniworld.models.movies123 import discovery
+from aniworld.models.movies123.episode import Movies123Episode as EnglishEpisode
+from aniworld.models.movies123.source import SourceError
 
 MASTER = """#EXTM3U
 #EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID="audio",NAME="Japanese",LANGUAGE="ja",DEFAULT=YES,URI="ja.m3u8"
@@ -87,17 +87,18 @@ def test_selected_hls_quality_and_audio_are_honored(monkeypatch, tmp_path):
 
 
 def test_queue_selection_reaches_episode_downloader():
-    _, episode = queued_episode(
+    from aniworld.models.movies123.source import base_url
+    from aniworld.web.worker import _build_episode
+
+    _, episode = _build_episode(
+        base_url() + "/watch/tv-example-abcd1234?s=2&e=3",
         {
-            "english_path": "/watch/tv-example-abcd1234",
-            "season": 2,
-            "episode": 3,
             "selected_provider": "vidlink",
             "selected_language": "Japanese audio + English subtitles",
             "selected_quality": "720p",
         },
+        {"id": 1, "language": "Source Audio", "provider": "vidrock"},
         "/media/TV",
-        1,
     )
     assert (
         episode.selected_provider,
@@ -138,7 +139,7 @@ def test_discovery_cache_reports_partial_results_without_rescanning(monkeypatch)
 def test_default_library_path_routes_media_and_keeps_staging_hidden(
     monkeypatch, tmp_path, kind, initial, expected
 ):
-    from aniworld import english_download as download
+    from aniworld.models.movies123 import episode as download
 
     movies, tv = tmp_path / "Movies", tmp_path / "TV"
     movies.mkdir()
@@ -194,7 +195,7 @@ def test_scan_enumerates_advertised_players_and_internal_servers(
     async def probe(browser, server):
         visited.append(server["name"])
         if server["name"] == "vidrock" and default_failed:
-            from aniworld.english_source import SourceUnavailable
+            from aniworld.models.movies123.source import SourceUnavailable
 
             raise SourceUnavailable(
                 "Default timed out",

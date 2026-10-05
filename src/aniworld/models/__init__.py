@@ -18,6 +18,7 @@ from .kinox import KinoxEpisode, KinoxSeason, KinoxSeries
 from .mangafire_to.series import MangaFireToChapter, MangaFireToPage, MangaFireToSeries
 from .megakino import MegaKinoEpisode
 from .moflix_stream import MoflixEpisode, MoflixSeason
+from .movies123 import Movies123Episode, Movies123Season, Movies123Series
 from .s_to import SerienstreamEpisode, SerienstreamSeason, SerienstreamSeries
 
 __all__ = [
@@ -45,6 +46,9 @@ __all__ = [
     "MegaKinoEpisode",
     "MoflixEpisode",
     "MoflixSeason",
+    "Movies123Episode",
+    "Movies123Season",
+    "Movies123Series",
     "SerienstreamEpisode",
     "SerienstreamSeason",
     "SerienstreamSeries",

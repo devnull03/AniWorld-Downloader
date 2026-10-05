@@ -1,8 +1,8 @@
-"""Adapt 123Movies to the shared search, title modal, and queue contracts."""
+"""Configured-origin URL matching and source-specific queue validation."""
 
 from urllib.parse import parse_qs, urlencode, urlsplit
 
-from .. import english_source as source
+from . import source
 
 
 def is_source_url(url):
@@ -32,69 +32,51 @@ def selection(url):
     return parsed.path, season, episode
 
 
-def document(url):
-    return source.details(*selection(url))
-
-
 def title_url(path, season=1, episode=1):
     return source.base_url() + path + "?" + urlencode({"s": season, "e": episode})
 
 
-def series(url):
-    item = document(url)
-    return {
-        "title": item["title"],
-        "description": item["description"]
-        + "\nAudio is preserved from the source; languages are not independently verified.",
-        "poster_url": "",
-        "genres": [],
-        "release_year": "",
-        "media_type": item["type"],
-    }
-
-
-def seasons(url):
-    item = document(url)
-    entries = item["seasons"] if item["type"] == "tv" else [{"number": 1}]
-    return [
-        {
-            "url": title_url(item["path"], entry["number"]),
-            "season_number": entry["number"],
-            "episode_count": None if item["type"] == "tv" else 1,
-            "are_movies": item["type"] == "movie",
-        }
-        for entry in entries
-    ]
-
-
-def episodes(url):
-    item = document(url)
-    _, season, _ = selection(url)
-    entries = (
-        item["episodes"]
-        if item["type"] == "tv"
-        else [{"number": 1, "title": item["title"]}]
-    )
-    return [
-        {
-            "url": title_url(item["path"], season, entry["number"]),
-            "episode_number": entry["number"],
-            "title_en": entry["title"],
-            "title_de": "",
-            "downloaded": False,
-            "availability_hint": entry.get("availability_hint", ""),
-            "available_languages": ["Source Audio"]
-            if item["download_supported"]
-            else [],
-        }
-        for entry in entries
-    ]
-
-
 def providers(url, full_scan=False):
-    from ..english_discovery import discover
+    from .discovery import discover
 
     return discover(*selection(url), full_scan)
+
+
+class ConfiguredURLPattern:
+    """Match this source against its saved origin at request time."""
+
+    def __init__(self, kind):
+        self.kind = kind
+
+    def fullmatch(self, url):
+        try:
+            if not is_source_url(url):
+                return None
+            selection(url)
+        except source.SourceError:
+            return None
+        parsed = urlsplit(url)
+        query = parse_qs(parsed.query)
+        kind = (
+            "episode"
+            if "e" in query or parsed.path.startswith("/watch/movie-")
+            else "season"
+            if "s" in query
+            else "series"
+        )
+        return source.TITLE_PATH.fullmatch(parsed.path) if kind == self.kind else None
+
+
+def queued_url(entry):
+    """Restore both prototype and current queue records against the saved origin."""
+    path = entry.get("english_path")
+    if entry.get("source") == "movies123":
+        path = entry.get("source_path")
+    if path is None:
+        return None
+    if not isinstance(path, str) or not source.TITLE_PATH.fullmatch(path):
+        raise source.SourceError("Invalid queued title path.")
+    return title_url(path, int(entry["season"]), int(entry["episode"]))
 
 
 def queue_entries(
@@ -146,7 +128,8 @@ def queue_entries(
             )
         entries.append(
             {
-                "english_path": path,
+                "source": "movies123",
+                "source_path": path,
                 **(
                     {
                         "selected_provider": provider,
@@ -158,7 +141,7 @@ def queue_entries(
                 ),
                 "season": season,
                 "episode": episode,
-                "url": f"{path}?s={season}&e={episode}",
+                "url": title_url(path, season, episode),
             }
         )
     return documents[next(iter(documents))]["title"], entries

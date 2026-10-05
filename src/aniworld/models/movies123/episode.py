@@ -7,16 +7,16 @@ import subprocess
 import tempfile
 import time
 from pathlib import Path
-from types import SimpleNamespace
 
 import ffmpeg
 import niquests
 
-from .config import logger
-from .english_browser import resolve_stream
-from .english_source import TITLE_PATH, SourceError, SourceUnavailable, _public_host
-from .models.common.common import _run_ffmpeg_with_progress, clean_title
-from .models.common.hls import cleanup_temp_files, download_hls_parallel
+from ...config import logger
+from ..common.common import _run_ffmpeg_with_progress, clean_title
+from ..common.hls import cleanup_temp_files, download_hls_parallel
+from .browser import resolve_stream
+from .source import TITLE_PATH, SourceError, SourceUnavailable, _public_host
+from .urls import selection, title_url
 
 
 def normalize_segment(data):
@@ -68,7 +68,7 @@ def verify_media(path):
     return metadata
 
 
-class EnglishEpisode:
+class _EpisodeDownload:
     def __init__(
         self,
         path,
@@ -83,7 +83,7 @@ class EnglishEpisode:
         if not isinstance(path, str) or not TITLE_PATH.fullmatch(path):
             raise SourceError("Invalid source title path.")
         self.path = path
-        self.season = int(season)
+        self.season_number = int(season)
         self.episode = int(episode)
         self.use_default_path = not selected_path
         self.selected_path = Path(
@@ -98,24 +98,24 @@ class EnglishEpisode:
 
     def _check_cancelled(self):
         if self.queue_id is not None:
-            from .web.db import is_queue_force_cancelled
+            from ...web.db import is_queue_force_cancelled
 
             if is_queue_force_cancelled(self.queue_id):
                 raise SourceError("Download cancelled.")
 
     def _resolve_once(self):
         if self.selected_provider:
-            from .english_discovery import resolve
+            from .discovery import resolve
 
             return resolve(
                 self.path,
-                self.season,
+                self.season_number,
                 self.episode,
                 self.selected_provider,
                 self.selected_language,
                 self.selected_quality,
             )
-        return resolve_stream(self.path, self.season, self.episode)
+        return resolve_stream(self.path, self.season_number, self.episode)
 
     def _resolve_with_retry(self):
         # Like VOE's extractor, retry opening a transiently unavailable player.
@@ -153,8 +153,8 @@ class EnglishEpisode:
         folder = base / title
         filename = title
         if stream["type"] == "tv":
-            folder = folder / f"Season {self.season}"
-            filename = f"{title} S{self.season:02d}E{self.episode:02d}"
+            folder = folder / f"Season {self.season_number}"
+            filename = f"{title} S{self.season_number:02d}E{self.episode:02d}"
         if self.selected_provider:
             qualifier = clean_title(
                 f"{self.selected_provider} {self.selected_language} {self.selected_quality}"
@@ -264,14 +264,48 @@ def fetch_subtitle(url, headers):
     raise SourceError("Too many subtitle redirects.")
 
 
-def queued_episode(entry, selected_path, queue_id):
-    return SimpleNamespace(name="English source"), EnglishEpisode(
-        entry["english_path"],
-        entry["season"],
-        entry["episode"],
-        selected_path,
-        queue_id,
-        entry.get("selected_provider"),
-        entry.get("selected_language", "Source Audio"),
-        entry.get("selected_quality", "Best available"),
-    )
+class Movies123Episode(_EpisodeDownload):
+    """Registered episode model with the usual URL-based constructor."""
+
+    def __init__(
+        self,
+        url,
+        season=None,
+        episode=None,
+        selected_path=None,
+        queue_id=None,
+        selected_provider=None,
+        selected_language="Source Audio",
+        selected_quality="Best available",
+        metadata=None,
+        series=None,
+    ):
+        if url.startswith("https://"):
+            path, season_number, episode_number = selection(url)
+        else:
+            # Internal prototype samples used relative paths and explicit numbers.
+            path, season_number, episode_number = url, season or 1, episode or 1
+        super().__init__(
+            path,
+            season_number,
+            episode_number,
+            selected_path,
+            queue_id,
+            selected_provider,
+            selected_language,
+            selected_quality,
+        )
+        from .season import Movies123Season
+
+        self.url = title_url(path, season_number, episode_number)
+        self.season = (
+            season
+            if isinstance(season, Movies123Season)
+            else Movies123Season(self.url, series=series)
+        )
+        self.episode_number = episode_number
+        self.title_en = (metadata or {}).get("title", f"Episode {episode_number}")
+        self.title_de = ""
+        self.availability_hint = (metadata or {}).get("availability_hint", "")
+        self.language_labels = ["Source Audio"]
+        self.provider_data = {}

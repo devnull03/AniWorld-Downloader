@@ -8,7 +8,6 @@ from flask import Blueprint
 
 from . import (
     api_autosync,
-    api_english,
     api_keys,
     api_library,
     api_media,
@@ -22,7 +21,7 @@ ADMIN_ENDPOINTS = {
     "pages.settings",
     "api.get_settings",
     "api.update_settings",
-    "api.check_english_source",
+    "api.check_source",
     "api.public_ip",
     "api.preview_schedule",
     "api.export_env",
@@ -56,7 +55,6 @@ def register_blueprints(app):
     api = Blueprint("api", __name__, url_prefix="/api")
     for module in (
         api_media,
-        api_english,
         api_queue,
         api_settings,
         api_library,

@@ -5,8 +5,9 @@ from types import SimpleNamespace
 
 import pytest
 
-from aniworld import english_source as source
-from aniworld.english_download import EnglishEpisode, normalize_segment
+from aniworld.models.movies123 import source
+from aniworld.models.movies123.episode import Movies123Episode as EnglishEpisode
+from aniworld.models.movies123.episode import normalize_segment
 from aniworld.web import db, worker
 
 WATCH = """<script type="application/ld+json">{"@type":"TVSeries","name":"Reacher","inLanguage":"en"}</script>
@@ -18,6 +19,36 @@ WATCH = """<script type="application/ld+json">{"@type":"TVSeries","name":"Reache
 <a class="ep-card" title="E2 · First Dance" href="/watch/tv-reacher-2pzovm4q?s=1&amp;e=2">2</a>
 <span class="ep-card is-upcoming">Future episode</span>"""
 PATH = "/watch/tv-reacher-2pzovm4q"
+
+
+def download_request(client, payload, **kwargs):
+    path = payload.get("path", "")
+    season = payload.get("season", 1)
+    episodes = payload.get("episodes", [])
+    valid = (
+        isinstance(path, str)
+        and source.TITLE_PATH.fullmatch(path)
+        and type(season) is int
+        and isinstance(episodes, list)
+        and all(type(number) is int for number in episodes)
+    )
+    return client.post(
+        "/api/download",
+        json={
+            "site": "movies123",
+            "series_url": source.base_url() + path if valid else "invalid",
+            "episodes": [
+                source.base_url() + path + f"?s={season}&e={number}"
+                for number in episodes
+            ]
+            if valid
+            else ["invalid"],
+            "provider": "vidrock",
+            "language": "Source Audio",
+            "custom_path_id": payload.get("custom_path_id"),
+        },
+        **kwargs,
+    )
 
 
 @pytest.fixture
@@ -61,7 +92,7 @@ def test_catalog_trailer_warning_is_separate_from_episode_title(monkeypatch, cli
 
 
 def test_episode_scraper_uses_browser_only_for_verification(monkeypatch):
-    from aniworld import english_browser
+    from aniworld.models.movies123 import browser as english_browser
 
     def fetch(*args):
         raise source.SourceError("The source requires browser verification.")
@@ -89,15 +120,15 @@ def test_details_do_not_accept_arbitrary_urls():
 
 
 def test_episode_selection_enters_existing_queue(client, source_details):
-    result = client.post(
-        "/api/english/download", json={"path": PATH, "season": 1, "episodes": [2, 1, 2]}
+    result = download_request(
+        client, {"path": PATH, "season": 1, "episodes": [2, 1, 2]}
     )
     assert result.status_code == 200
     item = db.get_queue_item(result.get_json()["queue_id"])
     entries = json.loads(item["episodes"])
-    assert [entry["episode"] for entry in entries] == [1, 2]
-    assert all(entry["english_path"] == PATH for entry in entries)
-    assert item["provider"] == "Vidrock"
+    assert [entry["episode"] for entry in entries] == [2, 1]
+    assert all(entry["source_path"] == PATH for entry in entries)
+    assert item["provider"] == "vidrock"
 
 
 def test_internal_provider_can_be_queued(client, source_details):
@@ -130,15 +161,15 @@ def test_internal_provider_can_be_queued(client, source_details):
     ],
 )
 def test_invalid_selection_never_queues(client, source_details, payload):
-    assert client.post("/api/english/download", json=payload).status_code == 400
+    assert download_request(client, payload).status_code == 400
     assert db.get_next_queued() is None
 
 
 def test_read_key_cannot_start_download(client, source_details, api_key):
     raw, _ = api_key(scope="read")
-    result = client.post(
-        "/api/english/download",
-        json={"path": PATH, "episodes": [1]},
+    result = download_request(
+        client,
+        {"path": PATH, "episodes": [1]},
         headers={"X-API-Key": raw},
     )
     assert result.status_code == 403
@@ -152,11 +183,9 @@ def test_queue_worker_uses_relative_title_after_domain_change(
     monkeypatch.setattr(
         EnglishEpisode,
         "download",
-        lambda self: calls.append((self.path, self.season, self.episode)),
+        lambda self: calls.append((self.path, self.season_number, self.episode)),
     )
-    response = client.post(
-        "/api/english/download", json={"path": PATH, "season": 1, "episodes": [2]}
-    )
+    response = download_request(client, {"path": PATH, "season": 1, "episodes": [2]})
     monkeypatch.setenv(source.ENV_KEY, "https://new-domain.example")
     queue_id = response.get_json()["queue_id"]
     worker._process(db.get_queue_item(queue_id))
@@ -169,9 +198,7 @@ def test_queue_records_download_failure(client, source_details, monkeypatch):
         raise source.SourceError("No playable stream.")
 
     monkeypatch.setattr(EnglishEpisode, "download", fail)
-    response = client.post(
-        "/api/english/download", json={"path": PATH, "episodes": [1]}
-    )
+    response = download_request(client, {"path": PATH, "episodes": [1]})
     queue_id = response.get_json()["queue_id"]
     worker._process(db.get_queue_item(queue_id))
     assert db.get_queue_item(queue_id)["status"] == "failed"

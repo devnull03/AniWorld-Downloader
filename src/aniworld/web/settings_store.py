@@ -10,7 +10,6 @@ import os
 
 import niquests as requests
 
-from .. import english_source
 from ..config import (
     ANIWORLD_CONFIG_DIR,
     LANG_LABELS,
@@ -18,6 +17,7 @@ from ..config import (
     parse_provider_order,
 )
 from ..logger import get_logger
+from ..models.movies123 import source as movies123_source
 from . import paths, schedule
 from .media import SITE_KEYS, SITE_LABELS, SITES_OFF_BY_DEFAULT, WORKING_PROVIDERS
 
@@ -366,7 +366,7 @@ def _persist_discord(updates):
 # ---------------------------------------------------------------------------
 def read_settings():
     return {
-        "movies123_base_url": english_source.base_url(),
+        "movies123_base_url": movies123_source.base_url(),
         "download_path": str(paths.default_download_path()),
         "lang_separation": paths.lang_separation_enabled(),
         "disable_english_sub": english_sub_disabled(),
@@ -485,10 +485,10 @@ def update_settings(data):
 
     if "movies123_base_url" in data:
         try:
-            updates[english_source.ENV_KEY] = english_source.normalize_base_url(
+            updates[movies123_source.ENV_KEY] = movies123_source.normalize_base_url(
                 data["movies123_base_url"]
             )
-        except english_source.SourceError as exc:
+        except movies123_source.SourceError as exc:
             raise SettingsError(str(exc)) from None
 
     if "download_path" in data:
@@ -520,13 +520,13 @@ def update_settings(data):
     if discord_changed:
         _collect_discord(data["discord"], updates)
 
-    if english_source.ENV_KEY in updates:
+    if movies123_source.ENV_KEY in updates:
         from ..env import persist_env_values
 
         try:
             persist_env_values(
                 ANIWORLD_CONFIG_DIR / ".env",
-                {english_source.ENV_KEY: updates[english_source.ENV_KEY]},
+                {movies123_source.ENV_KEY: updates[movies123_source.ENV_KEY]},
             )
         except OSError:
             raise SettingsError(
@@ -557,7 +557,7 @@ def _env_sections():
     """(heading, [(key, value)]) in the order they should be written."""
     discord = discord_settings()
     return [
-        ("English catalog", [(english_source.ENV_KEY, english_source.base_url())]),
+        ("English catalog", [(movies123_source.ENV_KEY, movies123_source.base_url())]),
         (
             "General",
             [

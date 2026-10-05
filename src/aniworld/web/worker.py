@@ -9,7 +9,7 @@ import threading
 import time
 
 from ..logger import get_logger
-from ..providers import resolve_provider
+from ..providers import resolve_provider, restore_queue_url
 from . import db, paths
 from .media import mangafire_format
 
@@ -72,13 +72,16 @@ def _episode_request(entry):
     if not isinstance(entry, dict):
         return str(entry), {}
 
-    url = (entry.get("url") or "").strip()
+    url = restore_queue_url(entry)
     extra = {}
     if entry.get("selected_pages") is not None:
         extra["selected_pages"] = entry["selected_pages"]
     if entry.get("series_url"):
         extra["_series_url"] = entry["series_url"]
     extra["_format"] = entry.get("mangafire_format", mangafire_format())
+    for key in ("selected_provider", "selected_language", "selected_quality"):
+        if key in entry:
+            extra[key] = entry[key]
     return url, extra
 
 
@@ -91,6 +94,13 @@ def _build_episode(url, extra, item, selected_path):
     }
 
     series = None
+    if provider.discovery:
+        kwargs.update(
+            selected_provider=extra.get("selected_provider"),
+            selected_language=extra.get("selected_language", "Source Audio"),
+            selected_quality=extra.get("selected_quality", "Best available"),
+            queue_id=item["id"],
+        )
     if provider.name == "MangaFire":
         series_url = extra.get("_series_url") or url.rsplit("/chapter/", 1)[0]
         try:
@@ -134,16 +144,12 @@ def _process(item):
     errors = []
 
     for index, entry in enumerate(entries):
-        url, extra = _episode_request(entry)
+        url = str(entry.get("url", "")) if isinstance(entry, dict) else str(entry)
         provider = None
         try:
+            url, extra = _episode_request(entry)
             db.update_queue_progress(queue_id, index, url)
-            if isinstance(entry, dict) and entry.get("english_path"):
-                from ..english_download import queued_episode
-
-                provider, episode = queued_episode(entry, selected_path, queue_id)
-            else:
-                provider, episode = _build_episode(url, extra, item, selected_path)
+            provider, episode = _build_episode(url, extra, item, selected_path)
             # Tells the captcha module to stream its browser into this queue item
             captcha._local.queue_id = queue_id
             try:

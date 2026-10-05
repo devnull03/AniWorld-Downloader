@@ -8,8 +8,8 @@ from urllib.parse import urlsplit
 
 from patchright.sync_api import Error, sync_playwright
 
-from .english_source import SourceError, SourceUnavailable, _public_host, details
-from .models.common.hls import _retry_after
+from ..common.hls import _retry_after
+from .source import SourceError, SourceUnavailable, _public_host, details
 
 _lock = threading.Lock()
 
@@ -46,7 +46,7 @@ def browser_executable(runtime):
 
 def watch_html(url):
     """Keep the daily visitor cookie; never load the watch-page video or ads."""
-    from .config import ANIWORLD_CONFIG_DIR
+    from ...config import ANIWORLD_CONFIG_DIR
 
     _public_host(url)
     origin = urlsplit(url).netloc

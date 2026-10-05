@@ -3,6 +3,7 @@
 from flask import Response, jsonify, request
 
 from ...logger import get_logger
+from ...models.movies123 import source
 from .. import db, schedule, settings_store, theming
 from ..media import normalize_default_sites
 
@@ -10,6 +11,7 @@ logger = get_logger(__name__)
 
 
 def register(bp):
+    bp.add_url_rule("/settings/source-check", view_func=check_source, methods=["POST"])
     bp.add_url_rule("/settings", view_func=get_settings)
     bp.add_url_rule("/settings", view_func=update_settings, methods=["PUT"])
     bp.add_url_rule("/settings/public-ip", view_func=public_ip)
@@ -31,6 +33,22 @@ def register(bp):
     bp.add_url_rule(
         "/custom-paths/<int:path_id>", view_func=delete_custom_path, methods=["DELETE"]
     )
+
+
+def check_source():
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict):
+        return jsonify({"error": "Expected a JSON object."}), 400
+    if data.get("source", "movies123") != "movies123":
+        return jsonify({"error": "This source does not support address checks."}), 400
+    try:
+        origin = source.normalize_base_url(data.get("base_url"))
+    except source.SourceError as exc:
+        return jsonify({"error": str(exc)}), 400
+    try:
+        return jsonify(source.check_address(origin))
+    except source.SourceError as exc:
+        return jsonify({"error": str(exc)}), 502
 
 
 def get_settings():

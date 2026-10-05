@@ -7,9 +7,10 @@ from types import SimpleNamespace
 import niquests
 import pytest
 
-from aniworld import english_browser, english_source
-from aniworld.english_download import EnglishEpisode
 from aniworld.models.common import hls
+from aniworld.models.movies123 import browser as english_browser
+from aniworld.models.movies123 import source as english_source
+from aniworld.models.movies123.episode import Movies123Episode as EnglishEpisode
 
 
 @pytest.fixture

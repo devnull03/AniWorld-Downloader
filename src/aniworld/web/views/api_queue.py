@@ -3,7 +3,8 @@
 from flask import Response, current_app, jsonify, request
 
 from ...logger import get_logger
-from .. import db, english_adapter, worker
+from ...providers import PROVIDERS, resolve_provider
+from .. import db, worker
 from ..media import mangafire_format
 from ..settings_store import english_sub_disabled
 
@@ -44,7 +45,9 @@ def _current_username():
 
 
 def start_download():
-    data = request.get_json(silent=True) or {}
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict):
+        return jsonify({"error": "Expected a JSON object."}), 400
     episodes = data.get("episodes") or []
     if not episodes:
         return jsonify({"error": "episodes list is required"}), 400
@@ -56,7 +59,20 @@ def start_download():
     provider = data.get("provider", "VOE")
     title = data.get("title", "Unknown")
     series_url = data.get("series_url", "")
-    if provider == "Vidrock" or english_adapter.is_source_url(series_url):
+    source_provider = None
+    if data.get("site"):
+        source_provider = next(
+            (p for p in PROVIDERS if p.name.casefold() == str(data["site"]).casefold()),
+            None,
+        )
+        if source_provider is None:
+            return jsonify({"error": "Select a registered source."}), 400
+    else:
+        try:
+            source_provider = resolve_provider(series_url)
+        except (ValueError, TypeError, AttributeError):
+            pass
+    if source_provider and source_provider.prepare_queue:
         custom_path_id = data.get("custom_path_id")
         if custom_path_id is not None and (
             type(custom_path_id) is not int or not db.get_custom_path(custom_path_id)
@@ -66,17 +82,16 @@ def start_download():
             ), 400
         language = data.get("language", "Source Audio")
         try:
-            title, episodes = english_adapter.queue_entries(
+            title, episodes = source_provider.prepare_queue(
                 series_url,
                 episodes,
                 provider=provider,
                 language=language,
                 quality=data.get("quality", "Best available"),
             )
-        except english_adapter.source.SourceError as exc:
+        except ValueError as exc:
             return jsonify({"error": str(exc)}), 400
 
-        series_url = english_adapter.selection(series_url)[0]
     if provider == "MangaFire":
         episodes = _tag_mangafire(episodes, data.get("mangafire_format"))
 

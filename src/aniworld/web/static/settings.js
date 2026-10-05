@@ -128,7 +128,7 @@
     button.disabled = true;
     el("movies123CheckStatus").textContent = "Checking…";
     try {
-      await apiSend("/api/english/check", "POST", { base_url: address });
+      await apiSend("/api/settings/source-check", "POST", { source: "movies123", base_url: address });
       if (el("movies123BaseUrl").value.trim() === address) {
         el("movies123CheckStatus").textContent = "Catalog reachable. Download servers are checked per title. Press Save address to use it.";
       }

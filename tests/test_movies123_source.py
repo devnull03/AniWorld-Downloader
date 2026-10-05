@@ -7,7 +7,7 @@ from types import SimpleNamespace
 import pytest
 from dotenv import load_dotenv
 
-from aniworld import english_source as source
+from aniworld.models.movies123 import source
 from aniworld.web import db, settings_store
 
 # Sanitized shapes observed on 123movie.sx, not a simulated player API.
@@ -145,7 +145,7 @@ def test_invalid_settings_batch_changes_nothing(client):
 def test_check_does_not_change_saved_address(monkeypatch, client):
     monkeypatch.setattr(source, "fetch", lambda *args: response())
     result = client.post(
-        "/api/english/check", json={"base_url": "https://new-domain.example"}
+        "/api/settings/source-check", json={"base_url": "https://new-domain.example"}
     )
     assert result.status_code == 200
     assert result.get_json()["download_supported"] is None
@@ -162,9 +162,8 @@ def test_address_check_rejects_unrelated_site(monkeypatch):
 
 def test_catalog_defers_download_capability_until_title_selection(monkeypatch, client):
     monkeypatch.setattr(source, "fetch", lambda *args: response())
-    body = client.get("/api/english/catalog").get_json()
+    body = client.get("/api/movies123-titles").get_json()
     assert len(body["results"]) == 2
-    assert body["download_supported"] is None
     result = client.get("/english")
     assert result.status_code == 302
     assert result.location == "/?site=movies123"
@@ -178,7 +177,7 @@ def test_catalog_defers_download_capability_until_title_selection(monkeypatch, c
 def test_address_check_requires_admin_key(client, api_key, scope):
     raw, _ = api_key(scope=scope)
     result = client.post(
-        "/api/english/check",
+        "/api/settings/source-check",
         json={"base_url": source.DEFAULT_BASE_URL},
         headers={"X-API-Key": raw},
     )
@@ -188,7 +187,7 @@ def test_address_check_requires_admin_key(client, api_key, scope):
 def test_catalog_requires_login(auth_client):
     db.create_user("root", "examplepassword", role="admin")
     assert auth_client.get("/english").status_code == 302
-    assert auth_client.get("/api/english/catalog").status_code in (302, 401)
+    assert auth_client.get("/api/movies123-titles").status_code in (302, 401)
 
 
 def test_private_dns_is_rejected(monkeypatch):
@@ -217,10 +216,15 @@ def mock_session(monkeypatch, result):
 
 
 def test_verification_page_is_not_an_empty_success(monkeypatch, client):
+    from aniworld.web.views import api_media
+
+    monkeypatch.setattr(api_media, "_browse_cache", {})
     mock_session(monkeypatch, response("<title>Quick check</title>"))
-    result = client.get("/api/english/catalog")
-    assert result.status_code == 502
-    assert "browser verification" in result.get_json()["error"]
+    result = client.get("/api/movies123-titles")
+    assert result.status_code == 500
+    assert result.get_json()["error"]
+    with pytest.raises(source.SourceError, match="browser verification"):
+        source.fetch("/home")
 
 
 def test_cross_domain_redirect_requires_manual_update(monkeypatch):

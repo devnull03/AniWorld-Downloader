@@ -17,15 +17,15 @@ from urllib.parse import urljoin, urlsplit
 import niquests
 from patchright.async_api import Error, async_playwright
 
-from .english_browser import browser_executable, player_http_failure
-from .english_source import (
+from ..common.hls import _parse_attributes
+from .browser import browser_executable, player_http_failure
+from .source import (
     SourceError,
     SourceUnavailable,
     _public_host,
     base_url,
     details,
 )
-from .models.common.hls import _parse_attributes
 
 _CACHE_TTL = 300
 PRESET_PLAYERS = ("vidnest", "vidrock", "moviesapi", "vidrift")
@@ -192,7 +192,7 @@ def _inspect_plain_media(stream, body):
     if urlsplit(url).scheme != "https":
         return
     _public_host(url)
-    from .english_download import normalize_segment
+    from .episode import normalize_segment
 
     with niquests.Session() as session:
         session.trust_env = False

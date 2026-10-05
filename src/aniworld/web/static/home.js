@@ -1046,7 +1046,10 @@
       language: hanime ? "Japanese" : manga ? "MangaFire" : languageSelect.value,
       provider: hanime ? "HanimeTV" : manga ? "MangaFire" : providerSelect.value
     };
-    if (currentSite === "movies123") body.quality = qualitySelect.value;
+    if (currentSite === "movies123") {
+      body.site = "movies123";
+      body.quality = qualitySelect.value;
+    }
     if (manga) body.mangafire_format = el("mangaFireFormat").value;
     if (customPathSelect.value) body.custom_path_id = Number(customPathSelect.value);
 

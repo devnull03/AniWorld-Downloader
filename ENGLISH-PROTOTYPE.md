@@ -11,6 +11,30 @@ address redirects to `/?site=movies123`; the separate prototype UI is removed.
 The source can be disabled in Settings → Sites, like the other sources.
 TV files use `Title/Season N/Title S01E01.mkv`; movies use `Title/Title.mkv`.
 
+Source code now lives in `src/aniworld/models/movies123`, with registered
+`Movies123Series`, `Movies123Season` and `Movies123Episode` classes. The shared
+provider registry resolves the configured origin dynamically; the standard
+media endpoints, CLI model selection and queue worker use these models.
+Optional registry hooks handle asynchronous discovery, source-specific queue
+validation and restoring saved URLs. The duplicate `api_english.py` and web
+adapter are removed. Address checking lives at `/api/settings/source-check`
+under the existing admin-only settings API. `/english` remains a page redirect.
+
+Old queue records with `english_path` still work through the registered model.
+New records use a `movies123` source marker and a relative `source_path`, so a
+saved domain change does not invalidate queued selections. Provider, audio and
+quality choices and the queue cancellation ID reach the same episode model.
+Models fetch season metadata lazily and use the shared `run_each` batch helper.
+
+Refactor verification: all 1,797 offline tests passed, including shared CLI
+model selection, lazy metadata, old/new queue records after an origin change,
+and continuing after a malformed queue record. Browser fixtures preserved the
+completed-discovery dialog, optional full scan and lazy season behavior. A
+short Tokyo Revengers download constructed by the shared queue factory verified
+1920×1080 video, audio and an English subtitle sidecar on the SSD outside the
+libraries. The removed duplicate catalog API returned 404; the settings check
+retained input validation and admin access control.
+
 The latest code discovers each title's advertised players in the background,
 including Vidrock's internal servers. The existing language/provider dropdowns
 fill progressively with playable HLS streams and declared audio tracks. English

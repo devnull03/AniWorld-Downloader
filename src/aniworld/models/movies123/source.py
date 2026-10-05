@@ -385,7 +385,7 @@ def details(path, season=1, episode=1):
     except SourceError as exc:
         if "browser verification" not in str(exc):
             raise
-        from .english_browser import watch_html
+        from .browser import watch_html
 
         body = watch_html(origin + request_path)
     parsed = WatchParser(body, origin, path)

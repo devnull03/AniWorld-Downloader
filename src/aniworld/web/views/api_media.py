@@ -10,6 +10,7 @@ from ...config import DEFAULT_USER_AGENT, GLOBAL_SESSION
 from ...extractors.provider.hanime_tv import fetch_hanime_trending
 from ...logger import get_logger
 from ...models.mangafire_to.series import _get as get_mangafire
+from ...models.movies123 import source as movies123_source
 from ...providers import resolve_provider
 from ...search import (
     GENRE_PAGE_SIZE,
@@ -26,7 +27,7 @@ from ...search import (
     fetch_popular_series,
     random_anime,
 )
-from .. import english_adapter, media, sitesearch
+from .. import media, sitesearch
 from ..settings_store import english_sub_disabled
 
 logger = get_logger(__name__)
@@ -157,8 +158,6 @@ def series():
 
     provider = None
     try:
-        if english_adapter.is_source_url(url):
-            return jsonify(english_adapter.series(url))
         provider = resolve_provider(url)
         found = provider.series_cls(url=url, **_build_kwargs(provider))
         return jsonify(
@@ -170,6 +169,7 @@ def series():
                 "description": getattr(found, "description", ""),
                 "genres": getattr(found, "genres", []),
                 "release_year": getattr(found, "release_year", ""),
+                "media_type": getattr(found, "media_type", ""),
             }
         )
     except Exception as exc:
@@ -196,8 +196,6 @@ def seasons():
 
     provider = None
     try:
-        if english_adapter.is_source_url(url):
-            return jsonify({"seasons": english_adapter.seasons(url)})
         provider = resolve_provider(url)
         if provider.name in SINGLE_PAGE_SITES:
             return jsonify({"seasons": _single_page_seasons(provider, url)})
@@ -206,14 +204,16 @@ def seasons():
         # burning-series has no per-season count on the series page, reading it
         # here would fetch every season up front. The count fills in when a
         # season is expanded instead.
-        defer_counts = provider.name == "BurningSeries"
+        defer_counts = provider.defer_episode_counts or provider.name == "BurningSeries"
         return jsonify(
             {
                 "seasons": [
                     {
                         "url": season.url,
                         "season_number": season.season_number,
-                        "episode_count": None if defer_counts else season.episode_count,
+                        "episode_count": None
+                        if defer_counts and not getattr(season, "are_movies", False)
+                        else season.episode_count,
                         "are_movies": getattr(season, "are_movies", False),
                         "chapter_type": getattr(season, "chapter_type", ""),
                     }
@@ -257,8 +257,6 @@ def episodes():
     series_url = request.args.get("series_url", "").strip() or None
     provider = None
     try:
-        if english_adapter.is_source_url(url):
-            return jsonify({"episodes": english_adapter.episodes(url)})
         provider = resolve_provider(url)
         if provider.name in SINGLE_PAGE_SITES:
             return jsonify({"episodes": _single_page_episodes(provider, url)})
@@ -374,6 +372,8 @@ def _season_episodes(provider, url, series_url):
                         fallback_languages = ["German Dub"]
                     fallback_languages_resolved = True
                 languages = fallback_languages
+        elif provider.discovery:
+            languages = episode.language_labels
         else:
             languages = media.language_labels(episode.provider_data)
         if provider.name == "HanimeTV" and not languages:
@@ -389,6 +389,7 @@ def _season_episodes(provider, url, series_url):
                 in downloaded,
                 "available_languages": languages,
                 "page_count": 0,
+                "availability_hint": getattr(episode, "availability_hint", ""),
             }
         )
     return results
@@ -448,12 +449,12 @@ def providers():
         return jsonify({"error": "url is required"}), 400
 
     try:
-        if english_adapter.is_source_url(url):
+        provider = resolve_provider(url)
+        if provider.discovery:
             mode = request.args.get("scan", "preset")
             if mode not in ("preset", "all"):
                 return jsonify({"error": "Select preset or all for discovery."}), 400
-            return jsonify(english_adapter.providers(url, full_scan=mode == "all"))
-        provider = resolve_provider(url)
+            return jsonify(provider.discovery(url, full_scan=mode == "all"))
         if provider.name == "MangaFire":
             return jsonify({"providers": {}})
 
@@ -658,7 +659,7 @@ _BROWSE_ROWS = (
         "movies123_titles",
         lambda: [
             {**item, "poster_url": item["poster"]}
-            for item in english_adapter.source.catalog()
+            for item in movies123_source.catalog()
         ],
     ),
     ("/new-animes", "new_animes", fetch_new_animes),
@@ -696,9 +697,7 @@ def _cached(key, fetch, *, raise_errors=False):
 def _make_browse_view(key, fetch):
     def view():
         cache_key = (
-            (key, english_adapter.source.base_url())
-            if key == "movies123_titles"
-            else key
+            (key, movies123_source.base_url()) if key == "movies123_titles" else key
         )
         results = _cached(cache_key, fetch)
         if results is None:

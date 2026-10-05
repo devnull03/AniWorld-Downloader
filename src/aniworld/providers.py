@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
-from re import Pattern
+from re import Match
+from typing import Protocol
 from urllib.parse import urlparse, urlunparse
 
 from .config import (
@@ -50,26 +52,56 @@ from .models import (
     MegaKinoEpisode,
     MoflixEpisode,
     MoflixSeason,
+    Movies123Episode,
+    Movies123Season,
+    Movies123Series,
     SerienstreamEpisode,
     SerienstreamSeason,
     SerienstreamSeries,
 )
 from .models.filmo_to.episode import FILMO_EPISODE_PATTERN
+from .models.movies123.urls import ConfiguredURLPattern, queue_entries, queued_url
+from .models.movies123.urls import providers as discover_movies123
+
+
+class URLPattern(Protocol):
+    """Both fixed regexes and configured-origin matchers expose fullmatch."""
+
+    def fullmatch(self, url: str, /) -> Match[str] | None: ...
 
 
 @dataclass(frozen=True)
 class Provider:
     name: str
-    series_pattern: Pattern[str] | None = None
-    season_pattern: Pattern[str] | None = None
-    episode_pattern: Pattern[str] | None = None
+    series_pattern: URLPattern | None = None
+    season_pattern: URLPattern | None = None
+    episode_pattern: URLPattern | None = None
 
     series_cls: type | None = None
     season_cls: type | None = None
     episode_cls: type | None = None
+    # Optional capabilities keep discovery and persisted source identifiers out
+    # of source-specific web controllers and worker branches.
+    defer_episode_counts: bool = False
+    discovery: Callable | None = None
+    prepare_queue: Callable | None = None
+    queue_url: Callable | None = None
 
 
 PROVIDERS = [
+    Provider(
+        name="Movies123",
+        series_pattern=ConfiguredURLPattern("series"),
+        season_pattern=ConfiguredURLPattern("season"),
+        episode_pattern=ConfiguredURLPattern("episode"),
+        series_cls=Movies123Series,
+        season_cls=Movies123Season,
+        episode_cls=Movies123Episode,
+        defer_episode_counts=True,
+        discovery=discover_movies123,
+        prepare_queue=queue_entries,
+        queue_url=queued_url,
+    ),
     Provider(
         name="HentaiTV",
         episode_pattern=HENTAI_TV_EPISODE_PATTERN,
@@ -209,3 +241,13 @@ def resolve_provider(url: str) -> Provider:
             return provider
 
     raise ValueError(f"Unsupported URL: {url}")
+
+
+def restore_queue_url(entry):
+    """Let registered sources restore persisted URLs after an origin change."""
+    for provider in PROVIDERS:
+        if provider.queue_url:
+            url = provider.queue_url(entry)
+            if url is not None:
+                return url
+    return (entry.get("url") or "").strip()
