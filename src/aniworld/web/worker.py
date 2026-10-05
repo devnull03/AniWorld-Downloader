@@ -138,7 +138,12 @@ def _process(item):
         provider = None
         try:
             db.update_queue_progress(queue_id, index, url)
-            provider, episode = _build_episode(url, extra, item, selected_path)
+            if isinstance(entry, dict) and entry.get("english_path"):
+                from ..english_download import queued_episode
+
+                provider, episode = queued_episode(entry, selected_path, queue_id)
+            else:
+                provider, episode = _build_episode(url, extra, item, selected_path)
             # Tells the captcha module to stream its browser into this queue item
             captcha._local.queue_id = queue_id
             try:

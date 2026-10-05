@@ -191,6 +191,24 @@
 
       <section class="settings-pane" id="pane-sites" role="tabpanel" aria-labelledby="tab-sites" tabindex="-1" hidden>
         <section class="card">
+          <h2>English source address (123Movies / GoMovies)</h2>
+          <label class="field">
+            <span class="field-label">Current website address</span>
+            <input type="url" id="movies123BaseUrl" placeholder="https://123movie.sx" />
+          </label>
+          <label class="site-row">
+            <span class="site-row-text"><span class="site-row-name">123Movies / GoMovies</span><span class="site-row-hint" data-i18n="settings.enable_movies123_hint">Movies and TV shows, using the source audio.</span></span>
+            <input type="checkbox" class="site-switch" id="enableMovies123" data-setting="enable_movies123" data-reload="1" role="switch" aria-label="123Movies" />
+          </label>
+          <p class="hint">Saved across restarts. When the domain changes, paste its new HTTPS address here.
+            Check the address before saving. The source must use the supported catalog and player layout.</p>
+          <div class="action-row">
+            <button class="btn btn-secondary" id="checkMovies123Btn" type="button">Check address</button>
+            <button class="btn btn-primary" id="saveMovies123Btn" type="button">Save address</button>
+          </div>
+          <p class="hint" id="movies123CheckStatus" role="status" aria-live="polite"></p>
+        </section>
+        <section class="card">
           <div class="card-head">
             <h2 data-i18n="settings.sites">Sites</h2>
             <span class="reset-badge" data-i18n="settings.resets">resets after restart</span>

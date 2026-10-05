@@ -8,8 +8,10 @@ from flask import (
     Response,
     abort,
     current_app,
+    redirect,
     render_template,
     send_from_directory,
+    url_for,
 )
 
 from ...config import ANIWORLD_CONFIG_DIR, LANG_LABELS
@@ -17,6 +19,12 @@ from .. import paths, settings_store, sitesearch, theming
 from ..media import WORKING_PROVIDERS
 
 bp = Blueprint("pages", __name__)
+
+
+@bp.route("/english")
+def english():
+    return redirect(url_for("pages.index", site="movies123"))
+
 
 # Language options per site. AniWorld is the only one with subs.
 STO_LANGUAGES = {"1": "German Dub", "2": "English Dub"}

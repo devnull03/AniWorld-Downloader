@@ -15,6 +15,9 @@
       {% if sites.sto %}
       <button class="segmented-btn" data-site="sto">SerienStream</button>
       {% endif %}
+      {% if sites.movies123 %}
+      <button class="segmented-btn" data-site="movies123">123Movies</button>
+      {% endif %}
       {% if sites.burningseries %}
       <button class="segmented-btn" data-site="burningseries">BurningSeries</button>
       {% endif %}
@@ -61,6 +64,12 @@
   </div>
 
   <div id="browse">
+    {% if sites.movies123 %}
+    <section class="browse-section" data-row="movies123_titles" data-sites="movies123">
+      <h2 class="browse-heading">Movies &amp; TV shows</h2>
+      <div class="browse-grid"></div>
+    </section>
+    {% endif %}
     {% if sites.aniworld %}
     <section class="browse-section" data-row="new_animes" data-sites="aniworld">
       <h2 class="browse-heading" data-i18n="browse.new_animes">New Animes</h2>
@@ -197,6 +206,14 @@
         </label>
       </div>
 
+      <div class="control-row" id="sourceQualityRow" hidden>
+        <label class="field">
+          <span class="field-label">Quality</span>
+          <select id="qualitySelect"><option>Best available</option></select>
+        </label>
+      </div>
+      <p class="hint" id="sourceDiscoveryStatus" role="status" aria-live="polite" hidden></p>
+
       <div class="control-row" id="mangaFireRow" hidden>
         <label class="field">
           <span class="field-label" data-i18n="index.format">Format</span>
@@ -249,6 +266,7 @@
 <script id="site-config" type="application/json">
   {{ {
     "SITE_LANGUAGES": {
+      "movies123": ["Source Audio"],
       "aniworld": lang_labels.values() | list,
       "sto": sto_lang_labels.values() | list,
       "megakino": megakino_lang_labels.values() | list,

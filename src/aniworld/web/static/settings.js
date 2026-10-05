@@ -95,6 +95,7 @@
     }
 
     el("downloadPath").value = settings.download_path || "";
+    el("movies123BaseUrl").value = settings.movies123_base_url || "";
     el("uiLanguage").value = settings.ui_language;
     el("outputFormat").value = settings.output_format;
 
@@ -112,6 +113,33 @@
   }
 
   /* ===== Simple toggles and selects ===== */
+  el("saveMovies123Btn").addEventListener("click", async () => {
+    if (await save({ movies123_base_url: el("movies123BaseUrl").value.trim() })) {
+      el("movies123CheckStatus").textContent = "Address saved. Check it to verify the catalog is reachable.";
+      load();
+    }
+  });
+  el("movies123BaseUrl").addEventListener("input", () => {
+    el("movies123CheckStatus").textContent = "";
+  });
+  el("checkMovies123Btn").addEventListener("click", async () => {
+    const button = el("checkMovies123Btn");
+    const address = el("movies123BaseUrl").value.trim();
+    button.disabled = true;
+    el("movies123CheckStatus").textContent = "Checking…";
+    try {
+      await apiSend("/api/english/check", "POST", { base_url: address });
+      if (el("movies123BaseUrl").value.trim() === address) {
+        el("movies123CheckStatus").textContent = "Catalog reachable. Download servers are checked per title. Press Save address to use it.";
+      }
+    } catch (error) {
+      if (el("movies123BaseUrl").value.trim() === address) {
+        el("movies123CheckStatus").textContent = error.message;
+      }
+    } finally {
+      button.disabled = false;
+    }
+  });
   document.querySelectorAll("[data-setting]").forEach((box) => {
     box.addEventListener("change", async () => {
       const ok = await save({ [box.dataset.setting]: box.checked });

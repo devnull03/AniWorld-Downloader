@@ -11,6 +11,7 @@ LANG_FOLDERS = {
     "German Sub": "german-sub",
     "English Dub": "english-dub",
     "English Sub": "english-sub",
+    "Source Audio": "source-audio",
 }
 
 ALL_LANG_FOLDERS = tuple(LANG_FOLDERS.values())

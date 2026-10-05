@@ -19,6 +19,26 @@
   const seriesContent = el("seriesContent");
   const languageSelect = el("languageSelect");
   const providerSelect = el("providerSelect");
+  // Older running servers may have cached the modal template before these
+  // controls were added. Keep the live UI usable without requiring a restart.
+  if (!el("qualitySelect")) {
+    const row = document.createElement("div");
+    row.id = "sourceQualityRow";
+    row.className = "control-row";
+    row.hidden = true;
+    row.innerHTML = '<label class="field"><span class="field-label">Quality</span><select id="qualitySelect"><option>Best available</option></select></label>';
+    el("languageProviderRow").after(row);
+  }
+  if (!el("sourceDiscoveryStatus")) {
+    const hint = document.createElement("p");
+    hint.id = "sourceDiscoveryStatus";
+    hint.className = "hint";
+    hint.hidden = true;
+    hint.setAttribute("role", "status");
+    el("sourceQualityRow").after(hint);
+  }
+  const qualitySelect = el("qualitySelect");
+  const sourceDiscoveryStatus = el("sourceDiscoveryStatus");
   const languageProviderRow = el("languageProviderRow");
   const mangaFireRow = el("mangaFireRow");
   const customPathRow = el("customPathRow");
@@ -38,6 +58,7 @@
   const BROWSE_REFRESH_MS = 300000;
 
   const SEARCH_PLACEHOLDERS = {
+    movies123: "Search 123Movies...",
     aniworld: "Search AniWorld...",
     sto: "Search SerienStream...",
     burningseries: "Search BurningSeries...",
@@ -60,7 +81,11 @@
 
   // Any site can be switched off in the settings, so the page opens on the
   // first tab that is actually there rather than on a fixed one
-  const firstSite = () => (siteButtons[0] ? siteButtons[0].dataset.site : "aniworld");
+  const firstSite = () => {
+    const requested = new URLSearchParams(window.location.search).get("site");
+    return siteButtons.some((button) => button.dataset.site === requested)
+      ? requested : (siteButtons[0] ? siteButtons[0].dataset.site : "aniworld");
+  };
 
   let currentSite = firstSite();
   let downloadedFolders = [];
@@ -74,6 +99,11 @@
   let episodeCache = {};
   let episodeLoads = {};
   let availableProviders = null;
+  let availableQualities = {};
+  let seriesMediaType = "";
+  let languageChosenByUser = false;
+  let providerChosenByUser = false;
+  let providerProbeUrl = "";
 
   const isHanime = (url) => url.includes("hanime.tv/");
   const isMangaFire = (url) => url.includes("mangafire.to/");
@@ -448,6 +478,7 @@
   function showSkeleton(loading) {
     seriesLoading.hidden = !loading;
     seriesContent.hidden = loading;
+    if (loading) seriesLoading.querySelector(".skeleton-status").textContent = t("index.loading_series", "Loading title...");
   }
 
   function resetModal() {
@@ -461,6 +492,13 @@
     episodeCache = {};
     episodeLoads = {};
     availableProviders = null;
+    availableQualities = {};
+    seriesMediaType = "";
+    languageChosenByUser = false;
+    providerChosenByUser = false;
+    providerProbeUrl = "";
+    qualitySelect.innerHTML = '<option>Best available</option>';
+    sourceDiscoveryStatus.textContent = "";
   }
 
   function rebuildLanguageOptions() {
@@ -474,22 +512,41 @@
   }
 
   function fillProviderSelect(providers) {
+    const previous = providerSelect.value;
+    const best = currentSite === "movies123" && !providerChosenByUser ? [...providers].sort((a,b) => Math.max(0,...(availableQualities[b] || []).map(q => /^\d+p$/.test(q) ? parseInt(q,10) : 0)) - Math.max(0,...(availableQualities[a] || []).map(q => /^\d+p$/.test(q) ? parseInt(q,10) : 0)))[0] : "";
     providerSelect.innerHTML = providers
       .map((name) => `<option value="${esc(name)}">${esc(name)}</option>`)
       .join("");
-    providerSelect.value = providers.includes("VOE") ? "VOE" : providers[0] || "";
+    providerSelect.value = best || (providers.includes(previous) ? previous : providers.includes("VOE") ? "VOE" : providers[0] || "");
+    updateQualitySelect();
   }
 
   function updateProviderSelect() {
     const forLanguage = availableProviders && availableProviders[languageSelect.value];
     if (forLanguage && forLanguage.length) {
       fillProviderSelect(forLanguage);
-    } else if (!["megakino", "moflix"].includes(currentSite)) {
+    } else if (!["megakino", "moflix", "movies123"].includes(currentSite)) {
       fillProviderSelect(window.STATIC_PROVIDERS);
     } else {
       providerSelect.innerHTML = "";
     }
   }
+
+  function updateQualitySelect() {
+    const previous = qualitySelect.value;
+    const offered = ["Best available", ...(availableQualities[providerSelect.value] || [])];
+    qualitySelect.replaceChildren();
+    for (const name of [...new Set(offered)]) {
+      const option = document.createElement("option");
+      option.value = name;
+      option.textContent = name;
+      qualitySelect.append(option);
+    }
+    qualitySelect.value = offered.includes(previous) ? previous : "Best available";
+    qualitySelect.disabled = !providerSelect.value;
+  }
+  providerSelect.addEventListener("change", () => { providerChosenByUser = true; updateQualitySelect(); });
+  qualitySelect.addEventListener("change", () => { providerChosenByUser = true; });
 
   // Hide language options the title does not actually offer
   function restrictLanguages() {
@@ -508,18 +565,85 @@
     }
   }
 
-  async function fetchProviders(episodeUrl) {
+  async function fetchProviders(episodeUrl, token = openToken, initial = true, waitUntilComplete = false, failures = 0) {
+    if (initial) {
+      providerProbeUrl = episodeUrl;
+      if (currentSite === "movies123") {
+        availableProviders = null;
+        availableQualities = {};
+        showDiscoveryPlaceholder(true);
+      }
+    }
     try {
-      const data = await apiFetch(`/api/providers?url=${encodeURIComponent(episodeUrl)}`);
+      const data = await apiFetch(`/api/providers?url=${encodeURIComponent(episodeUrl)}`, { timeoutMs: 30000 });
+      if (token !== openToken || episodeUrl !== providerProbeUrl) return;
       availableProviders = data.providers || null;
-      restrictLanguages();
-      updateProviderSelect();
+      if (currentSite === "movies123") {
+        const previous = languageSelect.value;
+        const languages = Object.keys(availableProviders || {});
+        languageSelect.replaceChildren();
+        for (const name of languages) {
+          const option = document.createElement("option");
+          option.value = name;
+          option.textContent = name;
+          languageSelect.append(option);
+        }
+        languageSelect.value = languageChosenByUser && languages.includes(previous) ? previous : data.preferred_language || languages.find(name => name.endsWith("+ English subtitles")) || languages[0] || "";
+        availableQualities = data.qualities || {};
+        sourceDiscoveryStatus.textContent = data.error || (data.discovering
+          ? `Finding available players, audio and quality… ${data.checked || 0}/${data.total || "?"} checked`
+          : languages.length ? `Discovery complete: ${data.checked || 0} players checked.` : "No supported players answered. Reopen the title to try again.");
+        if (waitUntilComplete) seriesLoading.querySelector(".skeleton-status").textContent = sourceDiscoveryStatus.textContent;
+        updateProviderSelect();
+        if (!languages.length) {
+          showDiscoveryPlaceholder(data.discovering);
+        } else {
+          languageSelect.disabled = false;
+          providerSelect.disabled = false;
+        }
+        if (data.discovering) {
+          if (waitUntilComplete) {
+            await new Promise(resolve => setTimeout(resolve, 2000));
+            if (token !== openToken || episodeUrl !== providerProbeUrl) return;
+            return fetchProviders(episodeUrl, token, false, true);
+          }
+          setTimeout(() => {
+            if (token === openToken && episodeUrl === providerProbeUrl) fetchProviders(episodeUrl, token, false);
+          }, 2000);
+        }
+      } else {
+        restrictLanguages();
+        updateProviderSelect();
+      }
     } catch (e) {
-      // keep the static provider list when the probe fails
+      if (token !== openToken || episodeUrl !== providerProbeUrl) return;
+      if (currentSite === "movies123") {
+        if (waitUntilComplete) {
+          if (failures >= 2) throw e;
+          seriesLoading.querySelector(".skeleton-status").textContent = `${e.message} Retrying discovery…`;
+          await new Promise(resolve => setTimeout(resolve, 5000));
+          if (token !== openToken || episodeUrl !== providerProbeUrl) return;
+          return fetchProviders(episodeUrl, token, false, true, failures + 1);
+        }
+        sourceDiscoveryStatus.textContent = `${e.message} Retrying discovery…`;
+        if (!availableProviders || !Object.keys(availableProviders).length) showDiscoveryPlaceholder(true);
+        setTimeout(() => {
+          if (token === openToken && episodeUrl === providerProbeUrl) fetchProviders(episodeUrl, token, false);
+        }, 5000);
+      }
     }
   }
 
-  languageSelect.addEventListener("change", updateProviderSelect);
+  function showDiscoveryPlaceholder(pending) {
+    const label = pending ? "Checking available audio…" : "No supported audio found";
+    languageSelect.innerHTML = `<option value="">${label}</option>`;
+    providerSelect.innerHTML = `<option value="">${pending ? "Checking available players…" : "No supported players found"}</option>`;
+    languageSelect.disabled = true;
+    providerSelect.disabled = true;
+    updateQualitySelect();
+  }
+
+  languageSelect.addEventListener("change", () => { languageChosenByUser = true; updateProviderSelect(); });
 
   async function openSeries(url) {
     const token = ++openToken;
@@ -533,11 +657,15 @@
     const manga = isMangaFire(url);
     languageProviderRow.hidden = hanime || manga;
     mangaFireRow.hidden = !manga;
+    el("sourceQualityRow").hidden = currentSite !== "movies123";
+    sourceDiscoveryStatus.hidden = currentSite !== "movies123";
     if (!hanime && !manga) {
+      languageSelect.disabled = false;
+      providerSelect.disabled = false;
       rebuildLanguageOptions();
-      fillProviderSelect(["megakino", "moflix"].includes(currentSite) ? [] : window.STATIC_PROVIDERS);
+      fillProviderSelect(["megakino", "moflix", "movies123"].includes(currentSite) ? [] : window.STATIC_PROVIDERS);
     }
-    loadCustomPaths();
+    const pathsLoaded = loadCustomPaths();
     loadAutosyncExclusion(url);
 
     try {
@@ -548,6 +676,14 @@
       if (token !== openToken) return;
 
       seriesTitle = series.title || "Unknown";
+      seriesMediaType = series.media_type || (new URL(url).pathname.startsWith("/watch/tv-") ? "tv" : new URL(url).pathname.startsWith("/watch/movie-") ? "movie" : "");
+      await pathsLoaded;
+      if (token !== openToken) return;
+      if (currentSite === "movies123" && seriesMediaType) {
+        const desired = seriesMediaType === "movie" ? "Jellyfin Movies" : "Jellyfin TV";
+        const destination = customPaths.find(path => path.name === desired);
+        if (destination) customPathSelect.value = String(destination.id);
+      }
       el("seriesTitle").innerHTML = `<a href="${esc(url)}" target="_blank" rel="noopener noreferrer">${esc(seriesTitle)}</a>`;
       if (series.poster_url) el("seriesPoster").src = series.poster_url;
       el("seriesGenres").textContent = (series.genres || []).join(", ");
@@ -562,7 +698,7 @@
       // The provider probe narrows the language/provider selects, so resolve it
       // before revealing or the dropdowns would visibly change afterwards
       if (firstEpisodes.length && !hanime && !manga) {
-        await fetchProviders(firstEpisodes[0].url);
+        await fetchProviders(firstEpisodes[0].url, token, true, currentSite === "movies123");
         if (token !== openToken) return;
       }
 
@@ -672,10 +808,13 @@
     const body = el(`seasonBody-${index}`);
     if (!season || !body) return Promise.resolve([]);
 
+    body.innerHTML = `<div class="accordion-message">${t("index.loading_episodes", "Loading episodes...")}</div>`;
+
     episodeLoads[index] = apiFetch(episodesUrl(season))
       .then((data) => {
         if (token !== openToken) return [];
         const episodes = data.episodes || [];
+        season.episode_count = episodes.length;
         episodeCache[index] = episodes;
         renderEpisodes(index, episodes);
         return episodes;
@@ -687,7 +826,7 @@
         return [];
       })
       .finally(() => {
-        delete episodeLoads[index];
+        if (token === openToken) delete episodeLoads[index];
       });
 
     return episodeLoads[index];
@@ -715,8 +854,14 @@
     const section = accordion.querySelector(`[data-index="${index}"]`);
     if (!body || !section) return;
 
+    const label = section.querySelector(".season-label");
+    const allDone = episodes.length > 0 && episodes.every((episode) => episode.downloaded);
+    label.innerHTML =
+      `<span class="arrow">&#9654;</span> ${esc(seasonLabel(seasons[index], episodes.length))}` +
+      (allDone ? ' <span class="ep-done">&#10003;</span>' : "");
+
     if (!episodes.length) {
-      body.innerHTML = `<div class="accordion-message">${t("index.no_episodes", "No episodes available.")}</div>`;
+      body.innerHTML = `<div class="accordion-message">${currentSite === "movies123" ? "The source returned no episode names or links for this season." : t("index.no_episodes", "No episodes available.")}</div>`;
       return;
     }
 
@@ -730,6 +875,8 @@
           ? `<span class="ep-title">${esc(name)}</span>`
           : `<span class="ep-title ep-title-missing">${t("index.not_available", "[Not available]")}</span>`;
         const done = episode.downloaded ? '<span class="ep-done">&#10003;</span>' : "";
+        const availability = episode.availability_hint === "trailer_only"
+          ? '<span class="lang-badge" title="The source catalog labels this episode as trailer only. Provider availability is checked separately.">Catalog says trailer only</span>' : "";
         const value = manga
           ? `${episode.chapter_url || episode.url}##${episode.page_number}`
           : episode.url;
@@ -742,17 +889,11 @@
             <input type="checkbox" value="${esc(value)}" data-season="${index}"${extra} />
             <span class="ep-num">${manga ? "P" : "E"}${episode.episode_number}</span>
             ${done}
-            <div class="ep-main">${title}${renderBadges(episode.available_languages)}</div>
+            <div class="ep-main">${title}${availability}${renderBadges(episode.available_languages)}</div>
           </div>`;
       })
       .join("");
 
-    // Refresh the header now that the real episode count is known
-    const label = section.querySelector(".season-label");
-    const allDone = episodes.every((episode) => episode.downloaded);
-    label.innerHTML =
-      `<span class="arrow">&#9654;</span> ${esc(seasonLabel(seasons[index], episodes.length))}` +
-      (allDone ? ' <span class="ep-done">&#10003;</span>' : "");
   }
 
   accordion.addEventListener("click", async (event) => {
@@ -763,14 +904,16 @@
     const section = header.closest(".season-section");
     const index = Number(section.dataset.index);
     const body = section.querySelector(".season-body");
-    if (!body.classList.contains("expanded") && !episodeCache[index]) {
-      await loadEpisodes(index);
-    }
-    header.classList.toggle("expanded");
-    body.classList.toggle("expanded");
+    const expanding = !body.classList.contains("expanded");
+    header.classList.toggle("expanded", expanding);
+    body.classList.toggle("expanded", expanding);
+    if (expanding && !episodeCache[index]) await loadEpisodes(index);
   });
 
   accordion.addEventListener("change", async (event) => {
+    if (currentSite === "movies123" && event.target.closest(".episode-item") && event.target.checked) {
+      fetchProviders(event.target.value);
+    }
     const seasonAll = event.target.dataset.seasonAll;
     if (seasonAll !== undefined) {
       const index = Number(seasonAll);
@@ -844,6 +987,10 @@
       episodeSpinner.classList.remove("active");
     }
 
+    if (currentSite === "movies123" && !providerSelect.value) {
+      showToast("This title has no supported download server.");
+      return;
+    }
     const episodes = collectEpisodes(all);
     if (!episodes.length) {
       showToast(
@@ -863,6 +1010,7 @@
       language: hanime ? "Japanese" : manga ? "MangaFire" : languageSelect.value,
       provider: hanime ? "HanimeTV" : manga ? "MangaFire" : providerSelect.value
     };
+    if (currentSite === "movies123") body.quality = qualitySelect.value;
     if (manga) body.mangafire_format = el("mangaFireFormat").value;
     if (customPathSelect.value) body.custom_path_id = Number(customPathSelect.value);
 

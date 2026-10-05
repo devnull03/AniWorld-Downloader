@@ -7,6 +7,7 @@ come back.
 
 import re
 
+from ..english_source import catalog as query_movies123
 from ..logger import get_logger
 from ..search import (
     fetch_aniworld_genres,
@@ -34,6 +35,7 @@ from ..search import (
 logger = get_logger(__name__)
 
 SITE_SEARCH = {
+    "movies123": query_movies123,
     "moflix": query_moflix,
     "aniworld": query_aniworld,
     "sto": query_s_to,

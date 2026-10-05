@@ -3,7 +3,7 @@
 from flask import Response, current_app, jsonify, request
 
 from ...logger import get_logger
-from .. import db, worker
+from .. import db, english_adapter, worker
 from ..media import mangafire_format
 from ..settings_store import english_sub_disabled
 
@@ -54,12 +54,35 @@ def start_download():
         return jsonify({"error": "English Sub downloads are disabled"}), 403
 
     provider = data.get("provider", "VOE")
+    title = data.get("title", "Unknown")
+    series_url = data.get("series_url", "")
+    if provider == "Vidrock" or english_adapter.is_source_url(series_url):
+        custom_path_id = data.get("custom_path_id")
+        if custom_path_id is not None and (
+            type(custom_path_id) is not int or not db.get_custom_path(custom_path_id)
+        ):
+            return jsonify(
+                {"error": "The selected download folder no longer exists."}
+            ), 400
+        language = data.get("language", "Source Audio")
+        try:
+            title, episodes = english_adapter.queue_entries(
+                series_url,
+                episodes,
+                provider=provider,
+                language=language,
+                quality=data.get("quality", "Best available"),
+            )
+        except english_adapter.source.SourceError as exc:
+            return jsonify({"error": str(exc)}), 400
+
+        series_url = english_adapter.selection(series_url)[0]
     if provider == "MangaFire":
         episodes = _tag_mangafire(episodes, data.get("mangafire_format"))
 
     queue_id = db.add_to_queue(
-        title=data.get("title", "Unknown"),
-        series_url=data.get("series_url", ""),
+        title=title,
+        series_url=series_url,
         episodes=episodes,
         language=language,
         provider=provider,

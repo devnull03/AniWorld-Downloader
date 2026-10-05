@@ -10,6 +10,7 @@ import os
 
 import niquests as requests
 
+from .. import english_source
 from ..config import (
     ANIWORLD_CONFIG_DIR,
     LANG_LABELS,
@@ -365,6 +366,7 @@ def _persist_discord(updates):
 # ---------------------------------------------------------------------------
 def read_settings():
     return {
+        "movies123_base_url": english_source.base_url(),
         "download_path": str(paths.default_download_path()),
         "lang_separation": paths.lang_separation_enabled(),
         "disable_english_sub": english_sub_disabled(),
@@ -481,6 +483,14 @@ def update_settings(data):
     """
     updates = {}
 
+    if "movies123_base_url" in data:
+        try:
+            updates[english_source.ENV_KEY] = english_source.normalize_base_url(
+                data["movies123_base_url"]
+            )
+        except english_source.SourceError as exc:
+            raise SettingsError(str(exc)) from None
+
     if "download_path" in data:
         updates["ANIWORLD_DOWNLOAD_PATH"] = str(data["download_path"]).strip()
 
@@ -510,6 +520,19 @@ def update_settings(data):
     if discord_changed:
         _collect_discord(data["discord"], updates)
 
+    if english_source.ENV_KEY in updates:
+        from ..env import persist_env_values
+
+        try:
+            persist_env_values(
+                ANIWORLD_CONFIG_DIR / ".env",
+                {english_source.ENV_KEY: updates[english_source.ENV_KEY]},
+            )
+        except OSError:
+            raise SettingsError(
+                "Could not save the source address. No settings were changed."
+            ) from None
+
     for key, value in updates.items():
         os.environ[key] = value
 
@@ -534,6 +557,7 @@ def _env_sections():
     """(heading, [(key, value)]) in the order they should be written."""
     discord = discord_settings()
     return [
+        ("English catalog", [(english_source.ENV_KEY, english_source.base_url())]),
         (
             "General",
             [

@@ -10,15 +10,19 @@ Anything the parser does not fully understand raises `HLSUnsupported` so the
 caller can fall back to letting FFmpeg handle the stream directly.
 """
 
+import math
 import os
+import random
 import re
 import struct
 import threading
 import time
 from collections import deque
 from concurrent.futures import ThreadPoolExecutor
+from datetime import UTC, datetime
+from email.utils import parsedate_to_datetime
 from pathlib import Path
-from urllib.parse import urljoin
+from urllib.parse import urljoin, urlsplit
 
 import niquests
 
@@ -105,6 +109,44 @@ class _Key:
 # -----------------------------------------------------------------------------
 
 _thread_local = threading.local()
+_cooldowns = {}
+_cooldown_lock = threading.Lock()
+_MAX_RETRY_WAIT = 60
+
+
+def _retry_after(value):
+    """Parse Retry-After seconds or HTTP date; ignore malformed values."""
+    try:
+        seconds = float(value)
+        return max(0, seconds) if math.isfinite(seconds) else None
+    except (TypeError, ValueError):
+        try:
+            date = parsedate_to_datetime(value)
+            return max(0, (date - datetime.now(UTC)).total_seconds())
+        except (TypeError, ValueError, OverflowError):
+            return None
+
+
+def _cool_down(host, delay):
+    with _cooldown_lock:
+        now = time.monotonic()
+        for key in list(_cooldowns):
+            if _cooldowns[key] <= now:
+                del _cooldowns[key]
+        _cooldowns[host] = max(_cooldowns.get(host, 0), now + delay)
+
+
+def _wait_for_host(host):
+    while True:
+        with _cooldown_lock:
+            delay = _cooldowns.get(host, 0) - time.monotonic()
+        if delay <= 0:
+            return
+        # An unusually long server cooldown should fail promptly rather than
+        # occupy workers or retry earlier than the server requested.
+        if delay > _MAX_RETRY_WAIT:
+            raise RuntimeError(f"{host} requested a longer cooldown; try again later")
+        time.sleep(delay)
 
 
 def _session():
@@ -127,27 +169,54 @@ def _default_headers(headers):
 
 
 def _fetch_text(url, headers):
-    resp = _session().get(url, headers=headers, timeout=SEGMENT_TIMEOUT)
-    resp.raise_for_status()
-    return resp.text
+    return _fetch(url, headers, text=True)
 
 
 def _fetch_bytes(url, headers):
-    """Fetch a URL, retrying transient failures."""
+    return _fetch(url, headers, text=False)
+
+
+def _fetch(url, headers, *, text):
+    """Retry transient HTTP failures, sharing server cooldowns across workers."""
+    host = urlsplit(url).netloc
     last_error = None
     for attempt in range(SEGMENT_RETRIES):
+        _wait_for_host(host)
+        resp = None
+        delay = 2**attempt + random.uniform(0, 0.5)
         try:
             resp = _session().get(url, headers=headers, timeout=SEGMENT_TIMEOUT)
+            status = resp.status_code
+            if status in (429, 503):
+                requested = _retry_after(resp.headers.get("Retry-After"))
+                delay = max(delay, requested or 0)
+                _cool_down(host, delay)
+                logger.warning(f"[HLS] {host}: HTTP {status}, backing off")
+            if 400 <= status < 500 and status not in (408, 429):
+                raise RuntimeError(f"{host} returned HTTP {status}; not retrying")
             resp.raise_for_status()
-            content = resp.content
+            content = resp.text if text else resp.content
             if not content:
                 raise ValueError("empty response body")
             return content
-        except Exception as err:
+        except (niquests.RequestException, ValueError) as err:
             last_error = err
             if attempt < SEGMENT_RETRIES - 1:
-                time.sleep(2**attempt)
-    raise RuntimeError(f"failed to fetch {url}: {last_error}") from last_error
+                if delay > _MAX_RETRY_WAIT:
+                    raise RuntimeError(
+                        f"{host} requested a longer cooldown; try again later"
+                    ) from err
+                if resp is None or resp.status_code not in (429, 503):
+                    time.sleep(delay)
+        finally:
+            if resp is not None:
+                resp.close()
+    # Avoid leaking signed media URLs into queue errors.
+    status = getattr(getattr(last_error, "response", None), "status_code", None)
+    reason = f"HTTP {status}" if status else type(last_error).__name__
+    raise RuntimeError(
+        f"failed to fetch from {host} after {SEGMENT_RETRIES} attempts ({reason})"
+    ) from last_error
 
 
 # -----------------------------------------------------------------------------
@@ -383,7 +452,16 @@ class _ProgressTracker:
 # -----------------------------------------------------------------------------
 
 
-def _download_playlist(playlist_url, headers, temp_prefix, suffix, tracker_factory):
+def _download_playlist(
+    playlist_url,
+    headers,
+    temp_prefix,
+    suffix,
+    tracker_factory,
+    segment_transform=None,
+    segment_limit=None,
+    concurrency_limit=None,
+):
     """Fetch every segment of a media playlist, in order, into one file.
 
     Returns the path written. The extension reflects the segment container so
@@ -395,9 +473,13 @@ def _download_playlist(playlist_url, headers, temp_prefix, suffix, tracker_facto
         raise HLSUnsupported("expected a media playlist, got a master playlist")
 
     segments, init_uri = _parse_media_playlist(text, playlist_url)
+    if segment_limit is not None:
+        segments = segments[:segment_limit]
     output_path = temp_prefix.with_suffix(f"{suffix}{'.mp4' if init_uri else '.ts'}")
     tracker = tracker_factory(len(segments))
     concurrency = get_concurrency()
+    if concurrency_limit is not None:
+        concurrency = min(concurrency, max(1, concurrency_limit))
 
     key_cache = {}
     key_cache_lock = threading.Lock()
@@ -416,9 +498,11 @@ def _download_playlist(playlist_url, headers, temp_prefix, suffix, tracker_facto
     def _fetch_segment(segment):
         uri, key, sequence = segment
         data = _fetch_bytes(uri, headers)
-        if key is None:
-            return data
-        return _decrypt_segment(data, _key_bytes(key.uri), _resolve_iv(key, sequence))
+        if key is not None:
+            data = _decrypt_segment(
+                data, _key_bytes(key.uri), _resolve_iv(key, sequence)
+            )
+        return segment_transform(data) if segment_transform else data
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -461,6 +545,11 @@ def download_hls_parallel(
     headers=None,
     preferred_audio_lang=None,
     label="",
+    segment_transform=None,
+    segment_limit=None,
+    video_variant_uri=None,
+    audio_rendition_uri=None,
+    concurrency_limit=None,
 ):
     """Download an HLS stream into local files ready for an FFmpeg remux.
 
@@ -470,7 +559,7 @@ def download_hls_parallel(
     Raises `HLSUnsupported` when the playlist needs features this downloader
     does not implement — callers should fall back to plain FFmpeg then.
     """
-    if get_concurrency() == 1:
+    if get_concurrency() == 1 and segment_transform is None:
         raise HLSUnsupported("parallel HLS download disabled")
 
     temp_prefix = Path(temp_prefix)
@@ -488,12 +577,40 @@ def download_hls_parallel(
         if not variants:
             raise HLSUnsupported("master playlist has no variants")
 
-        variant = max(variants, key=lambda item: item.bandwidth)
+        candidates = variants
+        if audio_rendition_uri is not None:
+            groups = {
+                item.group_id for item in renditions if item.uri == audio_rendition_uri
+            }
+            candidates = [item for item in variants if item.audio_group in groups]
+            if not candidates:
+                raise HLSUnsupported("Selected audio is not available in this playlist")
+        variant = max(candidates, key=lambda item: item.bandwidth)
+        if video_variant_uri is not None:
+            variant = next(
+                (item for item in variants if item.uri == video_variant_uri), None
+            )
+            if variant is None:
+                raise HLSUnsupported("Selected quality is not in this playlist")
         video_playlist = variant.uri
 
         rendition = _select_audio_rendition(
             renditions, variant.audio_group, preferred_audio_lang
         )
+        if audio_rendition_uri is not None:
+            rendition = next(
+                (
+                    item
+                    for item in renditions
+                    if item.uri == audio_rendition_uri
+                    and item.group_id == variant.audio_group
+                ),
+                None,
+            )
+            if rendition is None:
+                raise HLSUnsupported(
+                    "Selected audio is not available with this quality"
+                )
         if rendition is not None:
             audio_playlist = rendition.uri
             logger.debug(
@@ -509,7 +626,14 @@ def download_hls_parallel(
 
         written.append(
             _download_playlist(
-                video_playlist, headers, temp_prefix, ".hls_video", _video_tracker
+                video_playlist,
+                headers,
+                temp_prefix,
+                ".hls_video",
+                _video_tracker,
+                segment_transform,
+                segment_limit,
+                concurrency_limit,
             )
         )
 
@@ -520,7 +644,14 @@ def download_hls_parallel(
 
             written.append(
                 _download_playlist(
-                    audio_playlist, headers, temp_prefix, ".hls_audio", _audio_tracker
+                    audio_playlist,
+                    headers,
+                    temp_prefix,
+                    ".hls_audio",
+                    _audio_tracker,
+                    segment_transform,
+                    segment_limit,
+                    concurrency_limit,
                 )
             )
 

@@ -26,7 +26,7 @@ from ...search import (
     fetch_popular_series,
     random_anime,
 )
-from .. import media, sitesearch
+from .. import english_adapter, media, sitesearch
 from ..settings_store import english_sub_disabled
 
 logger = get_logger(__name__)
@@ -85,6 +85,8 @@ def search():
     data = request.get_json(silent=True) or {}
     keyword = (data.get("keyword") or "").strip()
     site = (data.get("site") or "aniworld").strip()
+    if len(keyword) > 200:
+        return jsonify({"error": "Search must be 200 characters or fewer."}), 400
     if not keyword:
         return jsonify({"error": "keyword is required"}), 400
 
@@ -155,6 +157,8 @@ def series():
 
     provider = None
     try:
+        if english_adapter.is_source_url(url):
+            return jsonify(english_adapter.series(url))
         provider = resolve_provider(url)
         found = provider.series_cls(url=url, **_build_kwargs(provider))
         return jsonify(
@@ -192,6 +196,8 @@ def seasons():
 
     provider = None
     try:
+        if english_adapter.is_source_url(url):
+            return jsonify({"seasons": english_adapter.seasons(url)})
         provider = resolve_provider(url)
         if provider.name in SINGLE_PAGE_SITES:
             return jsonify({"seasons": _single_page_seasons(provider, url)})
@@ -251,6 +257,8 @@ def episodes():
     series_url = request.args.get("series_url", "").strip() or None
     provider = None
     try:
+        if english_adapter.is_source_url(url):
+            return jsonify({"episodes": english_adapter.episodes(url)})
         provider = resolve_provider(url)
         if provider.name in SINGLE_PAGE_SITES:
             return jsonify({"episodes": _single_page_episodes(provider, url)})
@@ -440,6 +448,8 @@ def providers():
         return jsonify({"error": "url is required"}), 400
 
     try:
+        if english_adapter.is_source_url(url):
+            return jsonify(english_adapter.providers(url))
         provider = resolve_provider(url)
         if provider.name == "MangaFire":
             return jsonify({"providers": {}})
@@ -640,6 +650,14 @@ def _mangafire_card(item):
 
 
 _BROWSE_ROWS = (
+    (
+        "/movies123-titles",
+        "movies123_titles",
+        lambda: [
+            {**item, "poster_url": item["poster"]}
+            for item in english_adapter.source.catalog()
+        ],
+    ),
     ("/new-animes", "new_animes", fetch_new_animes),
     ("/popular-animes", "popular_animes", fetch_popular_animes),
     ("/new-series", "new_series", fetch_new_series),
@@ -674,9 +692,16 @@ def _cached(key, fetch, *, raise_errors=False):
 
 def _make_browse_view(key, fetch):
     def view():
-        results = _cached(key, fetch)
+        cache_key = (
+            (key, english_adapter.source.base_url())
+            if key == "movies123_titles"
+            else key
+        )
+        results = _cached(cache_key, fetch)
         if results is None:
-            return jsonify({"error": f"Failed to fetch {key.replace('_', ' ')}"}), 500
+            return jsonify(
+                {"error": f"Failed to fetch {str(key).replace('_', ' ')}"}
+            ), 500
         return jsonify(
             {
                 "results": [
