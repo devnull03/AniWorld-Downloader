@@ -166,9 +166,10 @@ class _EpisodeDownload:
         if output.is_file():
             verify_media(output)
             return output
-        folder.mkdir(parents=True, exist_ok=True)
-        staging = folder / ".download-staging"
-        staging.mkdir(exist_ok=True)
+        # Keep incomplete downloads outside title folders: Jellyfin indexes an
+        # empty series directory even when all its staging files are ignored.
+        staging = base / ".download-staging"
+        staging.mkdir(parents=True, exist_ok=True)
         workspace = tempfile.TemporaryDirectory(prefix="episode-", dir=staging)
         temporary = Path(workspace.name) / "video.pending.mkv"
         prefix = Path(workspace.name) / "stream.source"
@@ -224,6 +225,8 @@ class _EpisodeDownload:
                     raise SourceError(
                         "The English subtitle file has no usable captions."
                     )
+            folder.mkdir(parents=True, exist_ok=True)
+            if stream.get("subtitle"):
                 caption_pending.replace(caption_output)
             temporary.replace(output)
             return output

@@ -167,7 +167,8 @@ def test_default_library_path_routes_media_and_keeps_staging_hidden(
     output_folder = tmp_path / expected / "Example"
     if kind == "tv":
         output_folder = output_folder / "Season 1"
-    assert paths[0].is_relative_to(output_folder / ".download-staging")
+    assert paths[0].is_relative_to(tmp_path / expected / ".download-staging")
+    assert not output_folder.exists()
     assert not list(output_folder.glob("*.ts"))
 
 

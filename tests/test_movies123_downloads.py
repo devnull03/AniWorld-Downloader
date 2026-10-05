@@ -245,6 +245,7 @@ def test_remux_maps_video_and_selected_audio_without_timed_metadata(
     commands = []
 
     def remux(node, **kwargs):
+        assert not (tmp_path / "Reacher").exists()
         args = ffmpeg.get_args(node)
         commands.append(args)
         Path(args[-1]).write_bytes(b"verified media")
@@ -255,6 +256,54 @@ def test_remux_maps_video_and_selected_audio_without_timed_metadata(
     args = commands[0]
     maps = [args[i + 1] for i, arg in enumerate(args) if arg == "-map"]
     assert maps == ["0:v", "1:a" if separate_audio else "0:a"]
+
+
+@pytest.mark.parametrize("failure_stage", ["fetch", "verify", "subtitle"])
+def test_failed_download_does_not_create_a_jellyfin_series(
+    monkeypatch, tmp_path, failure_stage
+):
+    from pathlib import Path
+
+    import ffmpeg
+
+    from aniworld.models.movies123 import episode as download
+
+    item = EnglishEpisode(PATH, 2, 5, str(tmp_path), selected_provider="vidnest")
+    monkeypatch.setattr(
+        item,
+        "_resolve_with_retry",
+        lambda: {
+            "url": "https://cdn.example/master.m3u8",
+            "headers": {},
+            "title": "Reacher",
+            "type": "tv",
+            "subtitle": {"url": "https://cdn.example/en.vtt"},
+        },
+    )
+
+    def fail(*args, **kwargs):
+        raise RuntimeError("source unavailable")
+
+    monkeypatch.setattr(
+        download,
+        "download_hls_parallel",
+        fail if failure_stage == "fetch" else lambda *a, **kw: [tmp_path / "video.ts"],
+    )
+    monkeypatch.setattr(
+        download,
+        "_run_ffmpeg_with_progress",
+        lambda node, **kw: Path(ffmpeg.get_args(node)[-1]).write_bytes(b"media"),
+    )
+    monkeypatch.setattr(
+        download,
+        "verify_media",
+        fail if failure_stage == "verify" else lambda path: {},
+    )
+    monkeypatch.setattr(download, "fetch_subtitle", fail)
+    with pytest.raises(RuntimeError, match="source unavailable"):
+        item.download()
+    assert not (tmp_path / "Reacher").exists()
+    assert not list((tmp_path / ".download-staging").iterdir())
 
 
 @pytest.mark.parametrize("concurrency", [1, 4])
