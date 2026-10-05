@@ -25,6 +25,7 @@ from pathlib import Path
 from urllib.parse import urljoin, urlsplit
 
 import niquests
+from curl_cffi import requests as curl_requests
 
 try:
     from ...config import DEFAULT_USER_AGENT, logger
@@ -168,6 +169,23 @@ def _default_headers(headers):
     return merged
 
 
+def _session_for_url(url):
+    """Use libcurl for Vidzy, whose CDN rejects the niquests transport.
+
+    The same player URL and headers work with plain libcurl; no browser
+    impersonation or browser cookies are needed. Keep sessions per thread so
+    segment workers reuse connections without sharing a session concurrently.
+    """
+    host = (urlsplit(url).hostname or "").lower()
+    if host != "vidzy.cc" and not host.endswith(".vidzy.cc"):
+        return _session()
+    session = getattr(_thread_local, "vidzy_session", None)
+    if session is None:
+        session = curl_requests.Session()
+        _thread_local.vidzy_session = session
+    return session
+
+
 def _fetch_text(url, headers):
     return _fetch(url, headers, text=True)
 
@@ -185,7 +203,9 @@ def _fetch(url, headers, *, text):
         resp = None
         delay = 2**attempt + random.uniform(0, 0.5)
         try:
-            resp = _session().get(url, headers=headers, timeout=SEGMENT_TIMEOUT)
+            resp = _session_for_url(url).get(
+                url, headers=headers, timeout=SEGMENT_TIMEOUT
+            )
             status = resp.status_code
             if status in (429, 503):
                 requested = _retry_after(resp.headers.get("Retry-After"))
@@ -199,7 +219,11 @@ def _fetch(url, headers, *, text):
             if not content:
                 raise ValueError("empty response body")
             return content
-        except (niquests.RequestException, ValueError) as err:
+        except (
+            niquests.RequestException,
+            curl_requests.exceptions.RequestException,
+            ValueError,
+        ) as err:
             last_error = err
             if attempt < SEGMENT_RETRIES - 1:
                 if delay > _MAX_RETRY_WAIT:

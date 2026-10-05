@@ -216,6 +216,47 @@ def test_image_without_video_is_not_downloaded_as_success():
         normalize_segment(b"\x89PNG\r\n\x1a\n" + b"\x00" * 1000)
 
 
+@pytest.mark.parametrize("separate_audio", [False, True])
+def test_remux_maps_video_and_selected_audio_without_timed_metadata(
+    monkeypatch, tmp_path, separate_audio
+):
+    from pathlib import Path
+
+    import ffmpeg
+
+    from aniworld.models.movies123 import episode as download
+
+    item = EnglishEpisode(PATH, 2, 5, str(tmp_path), selected_provider="vidnest")
+    monkeypatch.setattr(
+        item,
+        "_resolve_with_retry",
+        lambda: {
+            "url": "https://cdn.example/master.m3u8",
+            "headers": {},
+            "title": "Reacher",
+            "type": "tv",
+        },
+    )
+    files = [tmp_path / "video.ts"]
+    if separate_audio:
+        files.append(tmp_path / "selected-audio.ts")
+    monkeypatch.setattr(download, "download_hls_parallel", lambda *a, **kw: files)
+    monkeypatch.setattr(download, "verify_media", lambda path: {})
+    commands = []
+
+    def remux(node, **kwargs):
+        args = ffmpeg.get_args(node)
+        commands.append(args)
+        Path(args[-1]).write_bytes(b"verified media")
+
+    monkeypatch.setattr(download, "_run_ffmpeg_with_progress", remux)
+    output = item.download()
+    assert output.read_bytes() == b"verified media"
+    args = commands[0]
+    maps = [args[i + 1] for i, arg in enumerate(args) if arg == "-map"]
+    assert maps == ["0:v", "1:a" if separate_audio else "0:a"]
+
+
 @pytest.mark.parametrize("concurrency", [1, 4])
 def test_hls_applies_segment_transform_and_validation_limit(
     monkeypatch, tmp_path, concurrency

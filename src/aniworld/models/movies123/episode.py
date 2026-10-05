@@ -194,7 +194,12 @@ class _EpisodeDownload:
                 concurrency_limit=3,
             )
             inputs = [ffmpeg.input(str(path)) for path in files]
-            node = ffmpeg.output(*inputs, str(temporary), c="copy")
+            # HLS video can also contain default audio and timed ID3 data.
+            # MKV rejects that data; map only video and the chosen audio track.
+            audio_input = inputs[1] if len(inputs) > 1 else inputs[0]
+            node = ffmpeg.output(
+                inputs[0].video, audio_input.audio, str(temporary), c="copy"
+            )
             _run_ffmpeg_with_progress(node, label=filename)
             verify_media(temporary)
             if stream.get("subtitle"):

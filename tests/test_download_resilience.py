@@ -29,7 +29,7 @@ def clock(monkeypatch):
     return now, waits
 
 
-def responses(monkeypatch, statuses):
+def responses(monkeypatch, statuses, error_type=niquests.HTTPError):
     calls, closed = [], []
     items = iter(statuses)
 
@@ -46,9 +46,7 @@ def responses(monkeypatch, statuses):
 
         def raise_for_status():
             if status >= 400:
-                raise niquests.HTTPError(
-                    "signed URL should stay private", response=response
-                )
+                raise error_type("signed URL should stay private", response=response)
 
         response.raise_for_status = raise_for_status
         return response
@@ -179,6 +177,68 @@ def test_connection_timeout_uses_bounded_backoff(monkeypatch, clock):
         hls._fetch_bytes("https://cdn.example/a.ts", {})
     assert len(calls) == 3
     assert clock[1] == [1, 2]
+
+
+def test_vidzy_transport_reuses_per_thread_sessions_and_keeps_other_hosts(monkeypatch):
+    import threading
+
+    monkeypatch.setattr(hls, "_thread_local", threading.local())
+    default = object()
+    created = []
+
+    def curl_session():
+        session = object()
+        created.append(session)
+        return session
+
+    monkeypatch.setattr(hls, "_session", lambda: default)
+    monkeypatch.setattr(hls.curl_requests, "Session", curl_session)
+    first = hls._session_for_url("https://v6.vidzy.cc/master.m3u8")
+    assert hls._session_for_url("https://v7.vidzy.cc/segment.ts") is first
+    assert hls._session_for_url("https://vidzy.cc/audio.m3u8") is first
+    for host in ("cdn.example", "vidzy.cc.example", "fakevidzy.cc"):
+        assert hls._session_for_url(f"https://{host}/segment.ts") is default
+    result = []
+    worker = threading.Thread(
+        target=lambda: result.append(
+            hls._session_for_url("https://v6.vidzy.cc/segment.ts")
+        )
+    )
+    worker.start()
+    worker.join()
+    assert result[0] is not first
+    assert len(created) == 2
+
+
+def test_vidzy_connection_timeout_keeps_bounded_backoff(monkeypatch, clock):
+    calls = []
+
+    def get(*args, **kwargs):
+        calls.append(1)
+        raise hls.curl_requests.exceptions.Timeout("signed URL should stay private")
+
+    monkeypatch.setattr(hls, "_session_for_url", lambda url: SimpleNamespace(get=get))
+    with pytest.raises(RuntimeError, match="3 attempts") as error:
+        hls._fetch_bytes("https://v6.vidzy.cc/a.ts?token=secret", {})
+    assert "secret" not in str(error.value)
+    assert len(calls) == 3
+    assert clock[1] == [1, 2]
+
+
+@pytest.mark.parametrize("status", [403, 429])
+def test_vidzy_http_errors_keep_existing_retry_policy(monkeypatch, clock, status):
+    attempts = 1 if status == 403 else 3
+    calls, closed = responses(
+        monkeypatch,
+        [(status, "7")] * attempts,
+        error_type=hls.curl_requests.exceptions.HTTPError,
+    )
+    # Run the same responses through the alternative transport boundary.
+    monkeypatch.setattr(hls, "_session_for_url", lambda url: hls._session())
+    with pytest.raises(RuntimeError, match=f"HTTP {status}"):
+        hls._fetch_bytes("https://v6.vidzy.cc/a.ts?token=secret", {})
+    assert len(calls) == len(closed) == attempts
+    assert clock[1] == ([] if status == 403 else [7, 7])
 
 
 @pytest.mark.parametrize("delay, expected_attempts", [(5, 2), (120, 1)])
