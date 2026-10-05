@@ -14,6 +14,7 @@ import niquests
 from ...config import logger
 from ..common.common import _run_ffmpeg_with_progress, clean_title
 from ..common.hls import cleanup_temp_files, download_hls_parallel
+from ..common.library import season_folder, series_folder
 from .browser import resolve_stream
 from .source import TITLE_PATH, SourceError, SourceUnavailable, _public_host
 from .urls import selection, title_url
@@ -153,7 +154,12 @@ class _EpisodeDownload:
         folder = base / title
         filename = title
         if stream["type"] == "tv":
-            folder = folder / f"Season {self.season_number}"
+            try:
+                series = series_folder(base, title)
+                folder = season_folder(series, self.season_number)
+            except ValueError as error:
+                raise SourceError(str(error)) from error
+            base = series.parent
             filename = f"{title} S{self.season_number:02d}E{self.episode:02d}"
         if self.selected_provider:
             qualifier = clean_title(

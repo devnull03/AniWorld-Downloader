@@ -51,6 +51,12 @@ segments and remux files stay inside `.download-staging` on the SSD. Default
 Movies/TV destinations are routed by media type; an explicitly chosen custom
 folder takes priority. The UI selects the configured Jellyfin Movies or TV
 folder when opening a title. Library `.ignore` files exclude temporary media.
+TV downloads reuse a unique matching series in adjacent TV/Anime libraries,
+ignoring punctuation and trailing year/provider-ID decorations in folder names.
+Existing season folders such as `Season 02` are reused. Arbitrary custom roots
+stay within their selected destination. Ambiguous title/season matches fail
+explicitly; translated titles and different source season numbering still need
+manual selection or correction.
 
 Discovery is limited to downloadable HLS returned by the player. Players that
 require unsupported layouts, iframe chains, verification or other stream
