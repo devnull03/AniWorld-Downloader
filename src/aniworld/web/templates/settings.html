@@ -191,24 +191,6 @@
 
       <section class="settings-pane" id="pane-sites" role="tabpanel" aria-labelledby="tab-sites" tabindex="-1" hidden>
         <section class="card">
-          <h2>English source address (123Movies / GoMovies)</h2>
-          <label class="field">
-            <span class="field-label">Current website address</span>
-            <input type="url" id="movies123BaseUrl" placeholder="https://123movie.sx" />
-          </label>
-          <label class="site-row">
-            <span class="site-row-text"><span class="site-row-name">123Movies / GoMovies</span><span class="site-row-hint" data-i18n="settings.enable_movies123_hint">Movies and TV shows, using the source audio.</span></span>
-            <input type="checkbox" class="site-switch" id="enableMovies123" data-setting="enable_movies123" data-reload="1" role="switch" aria-label="123Movies" />
-          </label>
-          <p class="hint">Saved across restarts. When the domain changes, paste its new HTTPS address here.
-            Check the address before saving. The source must use the supported catalog and player layout.</p>
-          <div class="action-row">
-            <button class="btn btn-secondary" id="checkMovies123Btn" type="button">Check address</button>
-            <button class="btn btn-primary" id="saveMovies123Btn" type="button">Save address</button>
-          </div>
-          <p class="hint" id="movies123CheckStatus" role="status" aria-live="polite"></p>
-        </section>
-        <section class="card">
           <div class="card-head">
             <h2 data-i18n="settings.sites">Sites</h2>
             <span class="reset-badge" data-i18n="settings.resets">resets after restart</span>
@@ -219,6 +201,27 @@
           </p>
 
           <div class="site-grid">
+            <div class="site-row">
+              <label class="site-row-text" for="enableMovies123">
+                <span class="site-row-top">
+                  <span class="site-row-name">123Movies / GoMovies</span>
+                  <span class="site-row-kind" data-i18n="settings.kind.mixed">Movies & series</span>
+                </span>
+                <span class="site-row-hint" data-i18n="settings.enable_movies123_hint">
+                  Movies and TV shows, using the source audio.
+                </span>
+              </label>
+              <div class="site-row-actions">
+                <button class="icon-btn site-config-btn" id="movies123SettingsBtn" type="button"
+                  title="Website address" data-i18n-title="settings.source_address"
+                  aria-label="Edit 123Movies website address" aria-haspopup="dialog"
+                  aria-controls="movies123SettingsOverlay" aria-expanded="false" disabled>
+                  <i class="fa-solid fa-gear" aria-hidden="true"></i>
+                </button>
+                <input type="checkbox" class="site-switch" id="enableMovies123" data-setting="enable_movies123"
+                  data-reload="1" role="switch" aria-label="123Movies" />
+              </div>
+            </div>
             <label class="site-row">
               <span class="site-row-text">
                 <span class="site-row-top">
@@ -869,6 +872,27 @@
       </section>
     </div>
   </div>
+</div>
+<div class="overlay" id="movies123SettingsOverlay" data-close-on-backdrop>
+  <form class="modal modal-narrow" id="movies123SettingsForm" role="dialog" aria-modal="true"
+    aria-labelledby="movies123SettingsTitle" aria-describedby="movies123SettingsHint">
+    <button class="modal-close" type="button" data-close-modal aria-label="Close">&times;</button>
+    <h2 class="modal-title" id="movies123SettingsTitle">123Movies / GoMovies</h2>
+    <p class="hint" id="movies123SettingsHint" data-i18n="settings.source_address_hint">
+      Update the HTTPS address when the website changes domains. Saved across restarts.
+    </p>
+    <label class="field">
+      <span class="field-label" data-i18n="settings.source_address">Website address</span>
+      <input type="url" id="movies123BaseUrl" placeholder="https://123movie.sx" required autocomplete="url" />
+    </label>
+    <p class="hint" id="movies123CheckStatus" role="status" aria-live="polite"></p>
+    <div class="modal-actions">
+      <button class="btn btn-secondary" id="checkMovies123Btn" type="button"
+        data-i18n="settings.check_address">Check address</button>
+      <button class="btn btn-secondary" type="button" data-close-modal data-i18n="common.cancel">Cancel</button>
+      <button class="btn btn-primary" id="saveMovies123Btn" type="submit" data-i18n="common.save">Save</button>
+    </div>
+  </form>
 </div>
 {% endblock %}
 

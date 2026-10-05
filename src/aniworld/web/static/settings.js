@@ -5,6 +5,7 @@
 
   const SITE_OPTIONS = [
     ["aniworld", "AniWorld"],
+    ["movies123", "123Movies / GoMovies"],
     ["sto", "SerienStream"],
     ["burningseries", "BurningSeries"],
     ["megakino", "MegaKino"],
@@ -19,6 +20,8 @@
   const SECRET_PLACEHOLDER = "••••••••";
 
   let providerOrder = [];
+  let movies123Address = "";
+  let sourceDialogVersion = 0;
 
   async function save(payload, message) {
     try {
@@ -95,7 +98,9 @@
     }
 
     el("downloadPath").value = settings.download_path || "";
-    el("movies123BaseUrl").value = settings.movies123_base_url || "";
+    movies123Address = settings.movies123_base_url || "";
+    el("movies123BaseUrl").value = movies123Address;
+    el("movies123SettingsBtn").disabled = false;
     el("uiLanguage").value = settings.ui_language;
     el("outputFormat").value = settings.output_format;
 
@@ -112,11 +117,53 @@
     applyDiscord(settings.discord || {});
   }
 
-  /* ===== Simple toggles and selects ===== */
-  el("saveMovies123Btn").addEventListener("click", async () => {
-    if (await save({ movies123_base_url: el("movies123BaseUrl").value.trim() })) {
-      el("movies123CheckStatus").textContent = "Address saved. Check it to verify the catalog is reachable.";
-      load();
+  /* ===== Source address dialog ===== */
+  const sourceOverlay = el("movies123SettingsOverlay");
+  el("movies123SettingsBtn").addEventListener("click", () => {
+    sourceDialogVersion += 1;
+    el("movies123BaseUrl").value = movies123Address;
+    el("movies123CheckStatus").textContent = "";
+    el("movies123SettingsBtn").setAttribute("aria-expanded", "true");
+    openModal("movies123SettingsOverlay");
+    el("movies123BaseUrl").focus();
+  });
+  sourceOverlay.addEventListener("modal-closed", () => {
+    sourceDialogVersion += 1;
+    el("movies123SettingsBtn").setAttribute("aria-expanded", "false");
+    el("movies123SettingsBtn").focus();
+  });
+  sourceOverlay.addEventListener("keydown", (event) => {
+    if (event.key !== "Tab") return;
+    const controls = Array.from(sourceOverlay.querySelectorAll("button:not(:disabled), input:not(:disabled)"));
+    const first = controls[0];
+    const last = controls[controls.length - 1];
+    if (event.shiftKey && document.activeElement === first) {
+      event.preventDefault();
+      last.focus();
+    } else if (!event.shiftKey && document.activeElement === last) {
+      event.preventDefault();
+      first.focus();
+    }
+  });
+  el("movies123SettingsForm").addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const button = el("saveMovies123Btn");
+    const address = el("movies123BaseUrl").value.trim();
+    const version = sourceDialogVersion;
+    button.disabled = true;
+    el("movies123CheckStatus").textContent = t("settings.saving", "Saving…");
+    try {
+      await apiSend("/api/settings", "PUT", { movies123_base_url: address });
+      movies123Address = new URL(address).origin;
+      showToast(t("settings.saved", "Saved"));
+      if (version === sourceDialogVersion) {
+        closeModal("movies123SettingsOverlay");
+        sourceOverlay.dispatchEvent(new CustomEvent("modal-closed"));
+      }
+    } catch (error) {
+      if (version === sourceDialogVersion) el("movies123CheckStatus").textContent = error.message;
+    } finally {
+      button.disabled = false;
     }
   });
   el("movies123BaseUrl").addEventListener("input", () => {
@@ -125,21 +172,24 @@
   el("checkMovies123Btn").addEventListener("click", async () => {
     const button = el("checkMovies123Btn");
     const address = el("movies123BaseUrl").value.trim();
+    if (!el("movies123BaseUrl").reportValidity()) return;
+    const version = sourceDialogVersion;
     button.disabled = true;
-    el("movies123CheckStatus").textContent = "Checking…";
+    el("movies123CheckStatus").textContent = t("settings.checking_address", "Checking…");
     try {
       await apiSend("/api/settings/source-check", "POST", { source: "movies123", base_url: address });
-      if (el("movies123BaseUrl").value.trim() === address) {
-        el("movies123CheckStatus").textContent = "Catalog reachable. Download servers are checked per title. Press Save address to use it.";
+      if (version === sourceDialogVersion && el("movies123BaseUrl").value.trim() === address) {
+        el("movies123CheckStatus").textContent = t("settings.address_reachable", "Catalog reachable. Save to use this address.");
       }
     } catch (error) {
-      if (el("movies123BaseUrl").value.trim() === address) {
+      if (version === sourceDialogVersion && el("movies123BaseUrl").value.trim() === address) {
         el("movies123CheckStatus").textContent = error.message;
       }
     } finally {
       button.disabled = false;
     }
   });
+  /* ===== Simple toggles and selects ===== */
   document.querySelectorAll("[data-setting]").forEach((box) => {
     box.addEventListener("change", async () => {
       const ok = await save({ [box.dataset.setting]: box.checked });
