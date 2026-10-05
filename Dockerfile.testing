@@ -1,0 +1,13 @@
+# Keep the verified upstream runtime and its Chromium/FFmpeg dependencies.
+# Only replace application code; dependency changes require a full Dockerfile build.
+FROM ghcr.io/phoenixthrush/aniworld-downloader@sha256:bbe279cbeeff9e666de7342f56d84491d6b1629c79b77af4ba8f3cf50279b82c
+
+USER root
+RUN rm -rf /opt/venv/lib/python3.13/site-packages/aniworld
+COPY --chown=aniworld:aniworld src/aniworld/ /opt/venv/lib/python3.13/site-packages/aniworld/
+
+ARG VCS_REF
+LABEL org.opencontainers.image.source="https://github.com/devnull03/AniWorld-Downloader" \
+      org.opencontainers.image.revision="${VCS_REF}"
+
+USER aniworld

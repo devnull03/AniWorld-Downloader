@@ -1,0 +1,69 @@
+name: aniworld-branch-testing
+
+services:
+  aniworld:
+    image: aniworld-downloader:english-sources-testing
+    pull_policy: never
+    container_name: aniworld-downloader-testing
+    # Startup/recovery belongs to the existing SSD supervisor.
+    restart: "no"
+    mem_limit: 1536m
+    memswap_limit: 2048m
+    ports:
+      - "127.0.0.1:${ANIWORLD_TEST_PORT:-8082}:8080"
+    environment:
+      ANIWORLD_INSTALL_FOLDER: /home/aniworld/.aniworld
+      ANIWORLD_DOWNLOAD_PATH: /media/Anime
+      ANIWORLD_LANGUAGE: English Sub
+      ANIWORLD_UI_LANGUAGE: en
+      ANIWORLD_NO_AUTO_INSTALL: "1"
+      ANIWORLD_WEB_AUTH: "1"
+      ANIWORLD_WEB_BASE_URL: https://aniworld.anoa-themis.ts.net
+      ANIWORLD_ENABLE_AUTOSYNC: "0"
+      ANIWORLD_ENABLE_ANIWORLD: "1"
+      ANIWORLD_ENABLE_MOVIES123: "1"
+      ANIWORLD_ENABLE_STO: "0"
+      ANIWORLD_ENABLE_MEGAKINO: "0"
+      ANIWORLD_ENABLE_MOFLIX: "0"
+      ANIWORLD_ENABLE_FILMPALAST: "0"
+      ANIWORLD_ENABLE_FILMO: "0"
+      ANIWORLD_ENABLE_MANGAFIRE: "0"
+    volumes:
+      - type: bind
+        source: /Users/devnull/Projects/AniWorld-Downloader/.docker-testing-config
+        target: /home/aniworld/.aniworld
+        bind:
+          create_host_path: false
+      - type: bind
+        source: /Volumes/Extreme SSD/Media/Anime
+        target: /media/Anime
+        bind:
+          create_host_path: false
+      - type: bind
+        source: /Volumes/Extreme SSD/Media/TV
+        target: /media/TV
+        bind:
+          create_host_path: false
+      - type: bind
+        source: /Volumes/Extreme SSD/Media/Movies
+        target: /media/Movies
+        bind:
+          create_host_path: false
+      # Preserve the original instance's download path alias.
+      - type: bind
+        source: /Volumes/Extreme SSD/Media/Anime
+        target: /app/Downloads
+        bind:
+          create_host_path: false
+    shm_size: 256m
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/login', timeout=5).close()"]
+      interval: 30s
+      timeout: 8s
+      start_period: 30s
+      retries: 3

@@ -220,3 +220,5 @@ __marimo__/
 # Isolated local English-source prototype state
 .prototype-config/
 .prototype-downloads/
+.docker-testing-config/
+.deployment-backups/
