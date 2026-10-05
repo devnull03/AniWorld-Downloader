@@ -67,3 +67,17 @@ Shared media files remain on the SSD; the testing configuration is preserved.
 - HTTPS login returns 200 through the approved AniWorld Tailscale service IP
   with hostname/certificate validation. This Mac's default resolver did not
   resolve the service name, so the check used curl's `--resolve` option.
+
+## Catalog discovery
+
+123Movies uses the shared home-page discovery row. Genre, type, country, release
+year, quality, and sort options come from the configured site's `/browser`
+filter form. Expand a group and select tags to combine filters; sort allows one
+selection. Load more retains those selections, and Clear filters restores the
+normal browse view. The quality tags describe the catalog's HD/CAM labels; the
+download dialog still discovers the playable stream's available resolutions.
+
+Single genre/country selections use native category pages. Combined filters
+use the native browser query and, when required, the existing visitor session.
+Failed upstream requests are reported rather than rendered as empty results.
+Changing the saved site URL uses separate discovery and metadata caches.

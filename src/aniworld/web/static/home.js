@@ -272,8 +272,16 @@
   let genrePage = 1;
   let genreItems = [];
   let genreLoading = false;
+  let genreGeneration = 0;
+  let selectedTags = {};
+  let tagTimer = null;
+  const filterGroups = {};
 
   function updateGenreBar() {
+    const heading = genreBar.querySelector(".genre-bar-title");
+    heading.dataset.i18n = currentSite === "movies123" ? "browse.tags" : "browse.genres";
+    heading.textContent = currentSite === "movies123"
+      ? t("browse.tags", "Discover by tags") : t("browse.genres", "Discover by genre");
     genreList.innerHTML = "";
     genreBar.hidden = !(window.GENRE_SITES || []).includes(currentSite);
     if (!genreBar.hidden) loadGenres(currentSite);
@@ -289,7 +297,16 @@
       `<span class="genre-hint">${t("common.loading", "Loading...")}</span>`;
     try {
       const data = await apiFetch(`/api/genres?site=${encodeURIComponent(site)}`);
-      genreChips[site] = (data.genres || [])
+      filterGroups[site] = data.filters || [];
+      genreChips[site] = site === "movies123" && filterGroups[site].length
+        ? `<button type="button" class="genre-chip" data-clear-tags>${esc(t("browse.clear_filters", "Clear filters"))}</button>` + filterGroups[site].map((group) =>
+          `<details class="discovery-group" ${group.key === "genre" ? "open" : ""}>
+            <summary>${esc(t("browse.filter_" + group.key, group.name))}</summary>
+            <div class="genre-list">${group.options.map((option) =>
+              `<button type="button" class="genre-chip" aria-pressed="false"
+                data-group="${esc(group.key)}" data-slug="${esc(option.slug)}">${esc(option.name)}</button>`
+            ).join("")}</div></details>`).join("")
+        : (data.genres || [])
         .map(
           (genre) =>
             `<button type="button" class="genre-chip" role="listitem"
@@ -309,13 +326,22 @@
   }
 
   function resetGenre() {
+    clearTimeout(tagTimer);
+    genreGeneration++;
+    genreLoading = false;
+    selectedTags = {};
+    searchSpinner.classList.remove("active");
+    genreMoreBtn.disabled = false;
     activeGenre = null;
     activeGenreSite = null;
     genreItems = [];
     genreMore.hidden = true;
     genreList
       .querySelectorAll(".genre-chip.active")
-      .forEach((chip) => chip.classList.remove("active"));
+      .forEach((chip) => {
+        chip.classList.remove("active");
+        chip.setAttribute("aria-pressed", "false");
+      });
   }
 
   // Back to the site's default view: no genre open, chips and browse rows back
@@ -327,8 +353,37 @@
   }
 
   genreList.addEventListener("click", (event) => {
+    if (event.target.closest("[data-clear-tags]")) { clearGenre(); return; }
     const chip = event.target.closest(".genre-chip");
     if (!chip) return;
+    if (chip.dataset.group) {
+      const key = chip.dataset.group;
+      const values = selectedTags[key] || [];
+      const multiple = filterGroups[currentSite].find((group) => group.key === key).multiple;
+      selectedTags[key] = values.includes(chip.dataset.slug)
+        ? values.filter((value) => value !== chip.dataset.slug)
+        : multiple ? [...values, chip.dataset.slug] : [chip.dataset.slug];
+      if (!selectedTags[key].length) delete selectedTags[key];
+      if (!Object.keys(selectedTags).length) { clearGenre(); return; }
+      genreList.querySelectorAll("[data-group]").forEach((button) => {
+        const active = (selectedTags[button.dataset.group] || []).includes(button.dataset.slug);
+        button.classList.toggle("active", active);
+        button.setAttribute("aria-pressed", String(active));
+      });
+      genreGeneration++;
+      genreLoading = false;
+      activeGenre = "tags";
+      activeGenreSite = currentSite;
+      genreItems = [];
+      genreMore.hidden = true;
+      searchInput.value = "";
+      browse.hidden = true;
+      resultsGrid.innerHTML = "";
+      searchSpinner.classList.add("active");
+      clearTimeout(tagTimer);
+      tagTimer = setTimeout(() => loadGenrePage(1), 250);
+      return;
+    }
     // clicking the open genre again goes back to the browse rows
     if (chip.dataset.slug === activeGenre) {
       clearGenre();
@@ -350,27 +405,35 @@
     if (genreLoading || !activeGenre) return;
     const slug = activeGenre;
     const site = activeGenreSite;
+    const generation = genreGeneration;
+    const query = new URLSearchParams({site, page: String(page)});
+    if (site === "movies123") {
+      Object.entries(selectedTags).forEach(([group, values]) =>
+        values.forEach((value) => query.append(group, value)));
+    } else query.set("slug", slug);
     genreLoading = true;
     genreMoreBtn.disabled = true;
     if (page === 1) searchSpinner.classList.add("active");
 
     try {
       const data = await apiFetch(
-        `/api/genre?site=${encodeURIComponent(site)}` +
-          `&slug=${encodeURIComponent(slug)}&page=${page}`
+        `/api/${site === "movies123" ? "discover" : "genre"}?${query}`
       );
       // a slow page 1 can land after the user already picked another genre
-      if (slug !== activeGenre || site !== activeGenreSite) return;
+      if (generation !== genreGeneration || site !== activeGenreSite) return;
       genrePage = page;
-      genreItems = genreItems.concat(data.results || []);
+      genreItems = [...new Map(genreItems.concat(data.results || [])
+        .map((item) => [item.url, item])).values()];
       renderCards(resultsGrid, genreItems);
       // serienstream and burningseries list no posters, fill them in per card
       loadMissingPosters();
       genreMore.hidden = !data.has_more;
     } catch (error) {
+      if (generation !== genreGeneration) return;
       showToast(`${t("browse.genre_failed", "Could not load genre")}: ${error.message}`);
       if (page === 1) clearGenre();
     } finally {
+      if (generation !== genreGeneration) return;
       genreLoading = false;
       genreMoreBtn.disabled = false;
       searchSpinner.classList.remove("active");

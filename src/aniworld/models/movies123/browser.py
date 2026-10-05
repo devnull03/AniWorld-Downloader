@@ -46,6 +46,15 @@ def browser_executable(runtime):
 
 def watch_html(url):
     """Keep the daily visitor cookie; never load the watch-page video or ads."""
+    return _visitor_html(url, "#player[data-embed]")
+
+
+def catalog_html(url):
+    """Use the same visitor session for the native catalog filter form."""
+    return _visitor_html(url, "#filters")
+
+
+def _visitor_html(url, selector):
     from ...config import ANIWORLD_CONFIG_DIR
 
     _public_host(url)
@@ -77,10 +86,7 @@ def watch_html(url):
                 button = page.locator("button").filter(has_text="Continue to")
                 button.wait_for(state="visible", timeout=10000)
                 button.click(timeout=10000)
-            page.wait_for_function(
-                "() => !!document.querySelector('#player[data-embed]')",
-                timeout=25000,
-            )
+            page.locator(selector).wait_for(state="attached", timeout=25000)
             if urlsplit(page.url).netloc != origin:
                 raise SourceError(
                     "The source changed domains. Update its saved address."
@@ -88,7 +94,7 @@ def watch_html(url):
             return page.content()
         except Error:
             raise SourceError(
-                "The source browser could not load the player page. Verification may need another attempt."
+                "The source browser could not load the requested page. Verification may need another attempt."
             ) from None
         finally:
             if context is not None:

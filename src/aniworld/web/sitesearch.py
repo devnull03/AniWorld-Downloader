@@ -8,6 +8,7 @@ come back.
 import re
 
 from ..logger import get_logger
+from ..models.movies123.catalog_discovery import genres as fetch_movies123_genres
 from ..models.movies123.source import catalog as query_movies123
 from ..search import (
     fetch_aniworld_genres,
@@ -149,6 +150,7 @@ def _resolve_url(site, item):
 
 # Every site whose genre listing the Web UI can offer.
 GENRE_LISTS = {
+    "movies123": fetch_movies123_genres,
     "aniworld": fetch_aniworld_genres,
     "sto": fetch_s_to_genres,
     "burningseries": fetch_burningseries_genres,

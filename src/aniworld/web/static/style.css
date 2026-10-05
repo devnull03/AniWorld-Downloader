@@ -2928,3 +2928,25 @@ details.advanced summary:hover {
   margin-left: 6px;
   text-transform: uppercase;
 }
+
+.discovery-group {
+  width: 100%;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-pill);
+  padding: 10px 16px;
+  background: var(--surface);
+}
+
+.discovery-group summary {
+  cursor: pointer;
+  color: var(--text-dim);
+  font-size: 0.85rem;
+}
+
+.discovery-group[open] {
+  border-radius: 16px;
+}
+
+.discovery-group[open] summary {
+  margin-bottom: 12px;
+}

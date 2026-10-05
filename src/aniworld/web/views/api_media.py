@@ -10,6 +10,7 @@ from ...config import DEFAULT_USER_AGENT, GLOBAL_SESSION
 from ...extractors.provider.hanime_tv import fetch_hanime_trending
 from ...logger import get_logger
 from ...models.mangafire_to.series import _get as get_mangafire
+from ...models.movies123 import catalog_discovery as movies123_catalog
 from ...models.movies123 import source as movies123_source
 from ...providers import resolve_provider
 from ...search import (
@@ -70,6 +71,7 @@ def register(bp):
     bp.add_url_rule("/proxy-image", view_func=proxy_image)
     bp.add_url_rule("/downloaded-folders", view_func=downloaded_folders)
     bp.add_url_rule("/genres", view_func=genres)
+    bp.add_url_rule("/discover", view_func=discover)
     bp.add_url_rule("/genre", view_func=genre)
     for path, key, fetch in _BROWSE_ROWS:
         bp.add_url_rule(
@@ -513,6 +515,12 @@ def downloaded_folders():
 def genres():
     """The genre list for the discover row of whichever site is open."""
     site = (request.args.get("site") or "aniworld").strip()
+    if site == "movies123":
+        try:
+            groups = movies123_catalog.filters()
+            return jsonify({"genres": movies123_catalog.genres(), "filters": groups})
+        except movies123_source.SourceError as exc:
+            return jsonify({"error": str(exc)}), 502
     if site not in sitesearch.GENRE_SITES:
         return jsonify({"genres": []})
     results = _cached(f"genres:{site}", lambda: sitesearch.genres(site))
@@ -530,6 +538,14 @@ def _genre_page(site, slug, page):
     """
     if site == "aniworld":
         return fetch_genre_animes(slug, page)
+    if site == "movies123":
+        data = movies123_catalog.discover({"genre": [slug]}, page)
+        return {
+            **data,
+            "results": [
+                {**item, "poster_url": item["poster"]} for item in data["results"]
+            ],
+        }
 
     end = page * GENRE_PAGE_SIZE
     results, has_more = sitesearch.genre_results(site, slug, end + 1)
@@ -558,7 +574,13 @@ def genre():
 
     try:
         data = _cached(
-            f"genre:{site}:{slug}:{page}",
+            (
+                "genre",
+                site,
+                movies123_source.base_url() if site == "movies123" else "",
+                slug,
+                page,
+            ),
             lambda: _genre_page(site, slug, page),
             raise_errors=True,
         )
@@ -568,6 +590,8 @@ def genre():
         return jsonify({"error": f"Failed to fetch genre {slug}"}), 502
     except RequestException:
         return jsonify({"error": f"Failed to fetch genre {slug}"}), 502
+    except movies123_source.SourceError as exc:
+        return jsonify({"error": str(exc)}), 502
     except ValueError:
         # Sites that know their genres up front reject an unknown one outright
         return jsonify({"error": f"Genre not available: {slug}"}), 404
@@ -589,6 +613,43 @@ def genre():
 # ---------------------------------------------------------------------------
 # Browse rows
 # ---------------------------------------------------------------------------
+def discover():
+    if request.args.get("site") != "movies123":
+        return jsonify(
+            {"error": "This source does not advertise catalog filters."}
+        ), 400
+    try:
+        page = int(request.args.get("page", "1"))
+        selected = {
+            key: request.args.getlist(key)
+            for key in request.args
+            if key not in ("site", "page")
+        }
+        key = (
+            "discover",
+            movies123_source.base_url(),
+            tuple((k, tuple(sorted(v))) for k, v in sorted(selected.items())),
+            page,
+        )
+        data = _cached(
+            key, lambda: movies123_catalog.discover(selected, page), raise_errors=True
+        )
+    except movies123_source.SourceError as exc:
+        return jsonify({"error": str(exc)}), 502
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+    return jsonify(
+        {
+            "page": page,
+            "has_more": data["has_more"],
+            "results": [
+                {**item, "poster_url": media.proxy_image(item.get("poster", ""))}
+                for item in data["results"]
+            ],
+        }
+    )
+
+
 def _fetch_hanime_trending():
     """Trending hanime, one card per franchise."""
     try:
